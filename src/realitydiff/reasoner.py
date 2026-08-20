@@ -119,7 +119,6 @@ class Reasoner:
     def initialize(self, claim: str) -> tuple[ClaimState, str]:
         result = self.model.complete(INIT_PROMPT.format(claim=claim.strip()), search=True)
         data = parse_json_object(result["text"])
-        self._merge_citations(data, result.get("citations") or [])
         state = self._state_from_payload(data, fallback_statement=claim)
         reason = str(data.get("reason") or "Initial internet survey.")
         return state, reason
@@ -141,7 +140,6 @@ class Reasoner:
             search=True,
         )
         data = parse_json_object(result["text"])
-        self._merge_citations(data, result.get("citations") or [])
         changed = bool(data.get("changed"))
         reason = str(data.get("reason") or "")
         if not changed:
@@ -150,31 +148,6 @@ class Reasoner:
         if state.tree_hash() == current.tree_hash():
             return current, reason or "No material change.", False
         return state, reason or "New evidence updated the belief.", True
-
-    def _merge_citations(self, data: dict[str, Any], citations: list[dict[str, str]]) -> None:
-        existing = {
-            (item.get("source_url") or "").rstrip("/")
-            for bucket in ("evidence_for", "evidence_against")
-            for item in data.get(bucket) or []
-            if isinstance(item, dict)
-        }
-        extras = data.setdefault("evidence_for", [])
-        if not isinstance(extras, list):
-            return
-        for citation in citations:
-            url = (citation.get("url") or "").rstrip("/")
-            if not url or url in existing:
-                continue
-            extras.append(
-                {
-                    "statement": citation.get("title") or f"Cited source: {url}",
-                    "source_url": url,
-                    "source_title": citation.get("title") or url,
-                    "weight": 0.4,
-                    "notes": "Attached from model citations; weight pending human review.",
-                }
-            )
-            existing.add(url)
 
     def _state_from_payload(
         self,
@@ -230,7 +203,8 @@ class Reasoner:
                 continue
             seen.add(candidate.id)
             parsed.append(candidate)
-        return parsed
+        parsed.sort(key=lambda item: item.weight, reverse=True)
+        return parsed[:12]
 
     def _parse_unknowns(self, items: list[Any], previous: dict[str, Unknown]) -> list[Unknown]:
         parsed: list[Unknown] = []
@@ -249,7 +223,7 @@ class Reasoner:
                 continue
             seen.add(unknown.id)
             parsed.append(unknown)
-        return parsed
+        return parsed[:8]
 
     def _parse_predictions(self, items: list[Any], previous: dict[str, Prediction]) -> list[Prediction]:
         parsed: list[Prediction] = []
@@ -276,4 +250,4 @@ class Reasoner:
                 continue
             seen.add(prediction.id)
             parsed.append(prediction)
-        return parsed
+        return parsed[:8]
