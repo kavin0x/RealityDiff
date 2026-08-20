@@ -10,6 +10,7 @@ def test_http_git_surface(tmp_path):
     engine = RealityDiff(BeliefStore(tmp_path / "db.sqlite"), model=ScriptedModel([INIT, WATCH_HIT]))
     with TestClient(create_app(engine, start_watcher=False)) as client:
         assert client.get("/api/health").json()["status"] == "ok"
+        assert client.get("/api/health").json()["version"]
         created = client.post(
             "/api/claims", json={"statement": "Apple is going to replace Siri with an LLM."}
         )
@@ -36,3 +37,7 @@ def test_http_git_surface(tmp_path):
         home = client.get("/")
         assert home.status_code == 200
         assert b"Reality Diff" in home.content
+        assert b"claim.watch()" in home.content
+        short = client.get(f"/api/claims/{claim_id}/diff", params={"a": log[1]["id"][:10], "b": log[0]["id"][:10]})
+        assert short.status_code == 200
+        assert short.json()["confidence_delta"] == 16

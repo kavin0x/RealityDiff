@@ -48,9 +48,12 @@ class BeliefStore:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        self._conn = sqlite3.connect(str(self.path), check_same_thread=False, timeout=30)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA busy_timeout=5000")
+            self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(SCHEMA)
             self._conn.commit()
 
@@ -74,7 +77,13 @@ class BeliefStore:
 
     def get_claim(self, claim_id: str) -> ClaimRecord | None:
         row = self._conn.execute("SELECT * FROM claims WHERE id = ?", (claim_id,)).fetchone()
-        return self._claim_from_row(row) if row else None
+        if row:
+            return self._claim_from_row(row)
+        if len(claim_id) >= 8:
+            rows = self._conn.execute("SELECT * FROM claims WHERE id LIKE ?", (claim_id + "%",)).fetchall()
+            if len(rows) == 1:
+                return self._claim_from_row(rows[0])
+        return None
 
     def list_claims(self) -> list[ClaimRecord]:
         rows = self._conn.execute("SELECT * FROM claims ORDER BY created_at DESC").fetchall()
@@ -117,9 +126,32 @@ class BeliefStore:
             return None
         return self.get_commit(claim.head)
 
-    def get_commit(self, commit_id: str) -> Commit | None:
+    def delete_claim(self, claim_id: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM commits WHERE claim_id = ?", (claim_id,))
+            self._conn.execute("DELETE FROM claims WHERE id = ?", (claim_id,))
+            self._conn.commit()
+
+    def get_commit(self, commit_id: str, *, claim_id: str | None = None) -> Commit | None:
         row = self._conn.execute("SELECT * FROM commits WHERE id = ?", (commit_id,)).fetchone()
-        return self._commit_from_row(row) if row else None
+        if row:
+            commit = self._commit_from_row(row)
+            if claim_id and commit.claim_id != claim_id:
+                return None
+            return commit
+        if len(commit_id) < 7:
+            return None
+        sql = "SELECT * FROM commits WHERE id LIKE ?"
+        params: list[str] = [commit_id + "%"]
+        if claim_id:
+            sql += " AND claim_id = ?"
+            params.append(claim_id)
+        rows = self._conn.execute(sql, params).fetchall()
+        if len(rows) == 1:
+            return self._commit_from_row(rows[0])
+        if len(rows) > 1:
+            raise ValueError(f"Ambiguous commit prefix {commit_id}")
+        return None
 
     def log(self, claim_id: str) -> list[Commit]:
         commits: list[Commit] = []

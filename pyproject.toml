@@ -1,6 +1,6 @@
 [project]
 name = "realitydiff"
-version = "0.1.0"
+version = "0.2.0"
 description = "Git for beliefs — living claims that watch the internet and version confidence."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -34,6 +34,7 @@ packages = ["src/realitydiff"]
 "src/realitydiff/static/index.html" = "realitydiff/static/index.html"
 "src/realitydiff/static/styles.css" = "realitydiff/static/styles.css"
 "src/realitydiff/static/app.js" = "realitydiff/static/app.js"
+"src/realitydiff/static/favicon.svg" = "realitydiff/static/favicon.svg"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from realitydiff.claim import Claim
@@ -10,11 +11,19 @@ from realitydiff.store import BeliefStore
 from realitydiff.xai import LanguageModel, XAIClient
 
 
+class WatchBusy(RuntimeError):
+    def __init__(self, claim_id: str) -> None:
+        super().__init__(f"Watch already running for {claim_id}")
+        self.claim_id = claim_id
+
+
 class RealityDiff:
     def __init__(self, store: BeliefStore, model: LanguageModel | None = None) -> None:
         self.store = store
         self.model = model or XAIClient()
         self.reasoner = Reasoner(self.model)
+        self._watch_locks: dict[str, threading.Lock] = {}
+        self._watch_meta = threading.Lock()
 
     @classmethod
     def open(cls, path: str | Path, model: LanguageModel | None = None) -> "RealityDiff":
@@ -27,40 +36,57 @@ class RealityDiff:
         return Claim(self.store, record)
 
     def open_claim(self, statement: str, *, author: str = "reasoner") -> tuple[Claim, Commit]:
+        statement = statement.strip()
+        if len(statement) < 3:
+            raise ValueError("Claim is too short")
         record = self.store.create_claim(statement)
-        state, reason = self.reasoner.initialize(statement)
-        commit = Commit.create(
-            claim_id=record.id,
-            parent_id=None,
-            state=state,
-            author=author,
-            message="Initial belief",
-            reason=reason,
-            previous_confidence=None,
-        )
-        self.store.append_commit(commit)
-        return self.claim(record.id), commit
+        try:
+            state, reason = self.reasoner.initialize(statement)
+            commit = Commit.create(
+                claim_id=record.id,
+                parent_id=None,
+                state=state,
+                author=author,
+                message="Initial belief",
+                reason=reason,
+                previous_confidence=None,
+            )
+            self.store.append_commit(commit)
+            return self.claim(record.id), commit
+        except Exception:
+            self.store.delete_claim(record.id)
+            raise
 
     def watch(self, claim_id: str, *, author: str = "watcher") -> WatchResult:
-        living = self.claim(claim_id)
-        head = living.head
-        if head is None:
-            raise RuntimeError("Claim has no commits yet")
-        new_state, reason, changed = self.reasoner.update(living.record.title, head.state)
-        self.store.mark_watched(claim_id)
-        if not changed:
-            return WatchResult(claim_id=claim_id, changed=False, detail=reason)
-        self.store.set_working_state(claim_id, new_state)
-        commit = living.commit(
-            "Watch update",
-            author=author,
-            reason=reason,
-        )
-        diff = diff_states(
-            head.state,
-            commit.state,
-            from_id=head.id,
-            to_id=commit.id,
-            reason=reason,
-        )
-        return WatchResult(claim_id=claim_id, changed=True, commit=commit, diff=diff, detail=reason)
+        lock = self._lock_for(claim_id)
+        if not lock.acquire(blocking=False):
+            raise WatchBusy(claim_id)
+        try:
+            living = self.claim(claim_id)
+            head = living.head
+            if head is None:
+                raise RuntimeError("Claim has no commits yet")
+            new_state, reason, changed = self.reasoner.update(living.record.title, head.state)
+            self.store.mark_watched(claim_id)
+            if not changed:
+                return WatchResult(claim_id=claim_id, changed=False, detail=reason)
+            self.store.set_working_state(claim_id, new_state)
+            commit = living.commit(
+                "Watch update",
+                author=author,
+                reason=reason,
+            )
+            diff = diff_states(
+                head.state,
+                commit.state,
+                from_id=head.id,
+                to_id=commit.id,
+                reason=reason,
+            )
+            return WatchResult(claim_id=claim_id, changed=True, commit=commit, diff=diff, detail=reason)
+        finally:
+            lock.release()
+
+    def _lock_for(self, claim_id: str) -> threading.Lock:
+        with self._watch_meta:
+            return self._watch_locks.setdefault(claim_id, threading.Lock())

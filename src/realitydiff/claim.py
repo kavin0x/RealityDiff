@@ -79,8 +79,8 @@ class Claim:
         return blame_history(self.id, self.log())
 
     def revert(self, sha: str, *, author: str = "user") -> Commit:
-        target = self._store.get_commit(sha)
-        if target is None or target.claim_id != self.id:
+        target = self._store.get_commit(sha, claim_id=self.id)
+        if target is None:
             raise KeyError(f"Unknown commit {sha}")
         head = self.head
         if head is None:
@@ -101,4 +101,4 @@ class Claim:
     def _resolve(self, ref: str) -> Commit | None:
         if ref.upper() in {"HEAD", "WORKING"}:
             return self.head
-        return self._store.get_commit(ref)
+        return self._store.get_commit(ref, claim_id=self.id)

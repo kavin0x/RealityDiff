@@ -1,5 +1,12 @@
 # Reality Diff
 
+[![version](https://img.shields.io/badge/version-0.2.0-b6e388?style=flat-square)](https://github.com/kavin0x/RealityDiff)
+[![python](https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![uv](https://img.shields.io/badge/packaging-uv-DE5FE9?style=flat-square)](https://docs.astral.sh/uv/)
+[![xAI](https://img.shields.io/badge/AI-xAI%20Grok-000000?style=flat-square)](https://docs.x.ai/)
+[![pytest](https://img.shields.io/badge/tests-pytest-06A77D?style=flat-square&logo=pytest&logoColor=white)](https://docs.pytest.org/)
+[![license](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
+
 Git for beliefs.
 
 Give it a claim:

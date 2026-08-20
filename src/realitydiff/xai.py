@@ -16,8 +16,8 @@ DEFAULT_MODELS = (
     "grok-4.6",
 )
 
-JSON_BLOCK = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
-JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
+JSON_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+TRAILING_COMMA = re.compile(r",(\s*[}\]])")
 
 
 class XAIError(RuntimeError):
@@ -76,7 +76,18 @@ class XAIClient:
                         last_error = XAIError(f"{model} HTTP {response.status_code}: {response.text[:500]}")
                         break
                     body = response.json()
+                    if body.get("error"):
+                        last_error = XAIError(str(body.get("error")))
+                        break
+                    if body.get("status") == "failed":
+                        last_error = XAIError(str(body.get("incomplete_details") or body))
+                        time.sleep(2 ** attempt)
+                        continue
                     text = extract_output_text(body)
+                    if not text.strip():
+                        last_error = XAIError(f"{model} returned empty output")
+                        time.sleep(2 ** attempt)
+                        continue
                     citations = extract_citations(body)
                     self.last_model = model
                     return {
@@ -139,16 +150,48 @@ def extract_citations(body: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def parse_json_object(text: str) -> dict[str, Any]:
-    text = text.strip()
-    match = JSON_BLOCK.search(text)
-    candidate = match.group(1) if match else None
-    if candidate is None:
-        match = JSON_OBJECT.search(text)
-        candidate = match.group(0) if match else text
-    try:
-        data = json.loads(candidate)
-    except json.JSONDecodeError as exc:
-        raise XAIError(f"Model did not return JSON: {text[:400]}") from exc
-    if not isinstance(data, dict):
-        raise XAIError("Model JSON was not an object")
-    return data
+    if not text or not str(text).strip():
+        raise XAIError("Model returned empty output")
+    cleaned = (
+        str(text)
+        .strip()
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2018", "'")
+        .replace("\u2019", "'")
+    )
+    blobs: list[str] = [m.group(1).strip() for m in JSON_FENCE.finditer(cleaned)]
+    blobs.extend(_json_blobs(cleaned))
+    blobs.append(cleaned)
+    seen: set[str] = set()
+    last_error: Exception | None = None
+    for blob in blobs:
+        if not blob or blob in seen:
+            continue
+        seen.add(blob)
+        for variant in (blob, TRAILING_COMMA.sub(r"\1", blob)):
+            try:
+                data = json.loads(variant)
+            except json.JSONDecodeError as exc:
+                last_error = exc
+                continue
+            if isinstance(data, dict):
+                return data
+    raise XAIError(f"Model did not return JSON: {cleaned[:400]}") from last_error
+
+
+def _json_blobs(text: str) -> list[str]:
+    decoder = json.JSONDecoder()
+    blobs: list[str] = []
+    idx = 0
+    while idx < len(text):
+        start = text.find("{", idx)
+        if start < 0:
+            break
+        try:
+            _, end = decoder.raw_decode(text, start)
+            blobs.append(text[start:end])
+            idx = end
+        except json.JSONDecodeError:
+            idx = start + 1
+    return blobs

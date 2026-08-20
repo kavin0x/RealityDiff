@@ -164,7 +164,7 @@ class Reasoner:
         return ClaimState(
             statement=str(data.get("statement") or fallback_statement).strip(),
             refined_statement=str(data.get("refined_statement") or "").strip(),
-            confidence=float(data.get("confidence") if data.get("confidence") is not None else 50),
+            confidence=_coerce_number(data.get("confidence"), default=50.0),
             summary=str(data.get("summary") or "").strip(),
             evidence_for=self._parse_evidence(data.get("evidence_for") or [], prev_for),
             evidence_against=self._parse_evidence(data.get("evidence_against") or [], prev_against),
@@ -181,12 +181,14 @@ class Reasoner:
             statement = str(item.get("statement") or "").strip()
             if not statement:
                 continue
-            source_url = (item.get("source_url") or None) or None
+            source_url = str(item.get("source_url") or "").strip() or None
+            if source_url and not source_url.startswith(("http://", "https://")):
+                source_url = None
             candidate = Evidence.make(
                 statement,
                 source_url=source_url,
                 source_title=item.get("source_title") or None,
-                weight=float(item.get("weight") or 0.5),
+                weight=_coerce_number(item.get("weight"), default=0.5, lo=0.0, hi=1.0),
                 notes=str(item.get("notes") or ""),
                 retrieved_at=utcnow(),
             )
@@ -251,3 +253,19 @@ class Reasoner:
             seen.add(prediction.id)
             parsed.append(prediction)
         return parsed[:8]
+
+
+def _coerce_number(value: Any, *, default: float, lo: float = 0.0, hi: float = 100.0) -> float:
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        number = float(value)
+    else:
+        text = str(value).strip().replace("%", "")
+        try:
+            number = float(text)
+        except ValueError:
+            return default
+    return max(lo, min(hi, number))
