@@ -1,0 +1,127 @@
+:root {
+  --bg: #0c0d0a;
+  --bg-2: #14150f;
+  --ink: #e7e1c9;
+  --muted: #8d8870;
+  --line: #2a2c22;
+  --for: #b6e388;
+  --against: #e28b73;
+  --unknown: #d6c27a;
+  --accent: #9ad0c2;
+  --danger: #e28b73;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); }
+body {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+}
+.serif { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; letter-spacing: 0; }
+.app {
+  display: grid;
+  grid-template-columns: 280px 1fr 320px;
+  min-height: 100vh;
+}
+.rail, .log-pane {
+  background: var(--bg-2);
+  border-right: 1px solid var(--line);
+  padding: 22px 18px;
+  overflow: auto;
+}
+.log-pane { border-right: 0; border-left: 1px solid var(--line); }
+.brand { display: flex; gap: 12px; align-items: center; margin-bottom: 28px; }
+.mark {
+  width: 36px; height: 36px; border: 1px solid var(--for);
+  display: grid; place-items: center; color: var(--for); font-size: 20px;
+}
+.brand h1 { margin: 0; font-size: 14px; font-weight: 600; }
+.brand p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
+.open-form label, .claim-list-wrap h2, .log-pane h2, .tree-grid h3, .kicker, .conf-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+textarea, button, pre {
+  font: inherit;
+  color: inherit;
+}
+textarea {
+  width: 100%;
+  background: #0c0d0a;
+  border: 1px solid var(--line);
+  padding: 10px;
+  resize: vertical;
+  margin: 8px 0 10px;
+}
+button {
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 8px 10px;
+  cursor: pointer;
+}
+button:hover { background: rgba(154, 208, 194, 0.08); }
+button:disabled { opacity: 0.45; cursor: wait; }
+#claim-list, #commit-log, .stack { list-style: none; padding: 0; margin: 0; }
+#claim-list li, #commit-log li, .stack li {
+  border-top: 1px solid var(--line);
+  padding: 10px 0;
+  cursor: pointer;
+}
+#claim-list li.active { color: var(--for); }
+.claim-meta { color: var(--muted); font-size: 11px; margin-top: 4px; }
+.stage { padding: 32px 40px; overflow: auto; }
+.empty { max-width: 520px; margin-top: 12vh; }
+.empty .serif { font-size: 42px; margin: 0 0 12px; }
+.hint { color: var(--muted); line-height: 1.6; }
+.hidden { display: none !important; }
+.claim-head { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
+.claim-head h2 { font-size: 34px; line-height: 1.15; margin: 8px 0; max-width: 720px; }
+.refined { color: var(--muted); max-width: 640px; }
+.confidence-card {
+  min-width: 160px;
+  border: 1px solid var(--line);
+  padding: 14px 16px;
+}
+.conf-value { font-size: 36px; font-family: "Instrument Serif", serif; }
+.conf-bar { height: 3px; background: var(--line); margin-top: 10px; }
+.conf-bar span { display: block; height: 100%; background: var(--for); width: 0; transition: width 0.4s ease; }
+.reason { color: var(--unknown); line-height: 1.55; max-width: 760px; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 22px 0 28px; }
+.tree-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px 36px;
+}
+.stack li { cursor: default; }
+.stack .src { color: var(--accent); font-size: 11px; display: block; margin-top: 4px; word-break: break-all; }
+.stack .w { color: var(--muted); font-size: 11px; }
+#ev-for li { border-left: 2px solid var(--for); padding-left: 10px; }
+#ev-against li { border-left: 2px solid var(--against); padding-left: 10px; }
+#unknowns li { border-left: 2px solid var(--unknown); padding-left: 10px; }
+#predictions li { border-left: 2px solid var(--accent); padding-left: 10px; }
+.summary { margin-top: 36px; color: var(--muted); max-width: 760px; line-height: 1.6; }
+#commit-log li .sha { color: var(--for); }
+#commit-log li .msg { display: block; margin-top: 4px; }
+#commit-log li .why { color: var(--muted); display: block; margin-top: 4px; }
+.detail { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 16px; }
+pre {
+  white-space: pre-wrap;
+  background: #0c0d0a;
+  border: 1px solid var(--line);
+  padding: 12px;
+  max-height: 40vh;
+  overflow: auto;
+}
+.toast {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  background: #1b1d14; border: 1px solid var(--line); padding: 10px 14px;
+}
+.status { color: var(--muted); font-size: 11px; }
+@media (max-width: 1100px) {
+  .app { grid-template-columns: 1fr; }
+  .tree-grid { grid-template-columns: 1fr; }
+}
