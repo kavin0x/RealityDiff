@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reality Diff — Git for beliefs</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="app">
+    <aside class="rail">
+      <header class="brand">
+        <div class="mark">Δ</div>
+        <div>
+          <h1>Reality Diff</h1>
+          <p>git for beliefs</p>
+        </div>
+      </header>
+      <form id="open-form" class="open-form">
+        <label for="claim-input">New claim</label>
+        <textarea id="claim-input" rows="3" maxlength="2000" placeholder="Apple is going to replace Siri with an LLM." required></textarea>
+        <button type="submit" id="open-btn">claim.open()</button>
+      </form>
+      <label class="filter-label" for="claim-filter">Filter heads</label>
+      <input id="claim-filter" type="search" placeholder="search claims" />
+      <section class="claim-list-wrap">
+        <h2>HEADS</h2>
+        <ul id="claim-list"></ul>
+      </section>
+    </aside>
+
+    <main class="stage">
+      <div id="empty" class="empty">
+        <p class="kicker">living claims</p>
+        <p class="serif">Give it a claim.</p>
+        <p class="hint">The system creates a versioned belief object, then watches the internet. When evidence moves, confidence commits — like git, for what’s true.</p>
+        <ol class="empty-steps">
+          <li>open a testable claim</li>
+          <li>inspect for / against / unknowns</li>
+          <li>watch, diff, blame, or revert</li>
+        </ol>
+      </div>
+      <section id="claim-view" class="hidden">
+        <header class="claim-head">
+          <div>
+            <div class="kicker-row">
+              <span class="kicker" id="claim-id"></span>
+              <button type="button" class="ghost" id="copy-id" title="Copy claim id">copy</button>
+              <span id="watching-chip" class="chip">watching</span>
+              <span id="dirty-chip" class="chip hidden">dirty</span>
+            </div>
+            <h2 class="serif" id="claim-title"></h2>
+            <p class="refined" id="claim-refined"></p>
+          </div>
+          <div class="confidence-card">
+            <div class="conf-label">confidence</div>
+            <div class="conf-value" id="conf-value">—</div>
+            <div class="conf-delta" id="conf-delta"></div>
+            <div class="conf-bar"><span id="conf-fill"></span></div>
+            <svg id="spark" class="spark" viewBox="0 0 120 28" preserveAspectRatio="none"></svg>
+          </div>
+        </header>
+        <p class="reason" id="claim-reason"></p>
+        <div class="actions">
+          <button id="watch-btn">claim.watch()</button>
+          <button id="diff-btn">claim.diff()</button>
+          <button id="blame-btn">claim.blame()</button>
+          <button id="revert-btn" class="danger">claim.revert()</button>
+          <label class="watch-toggle">
+            <input type="checkbox" id="watching-toggle" />
+            live watch
+          </label>
+        </div>
+        <div class="tree-grid">
+          <article>
+            <h3>Evidence FOR <span class="count" id="count-for">0</span></h3>
+            <ul id="ev-for" class="stack"></ul>
+          </article>
+          <article>
+            <h3>Evidence AGAINST <span class="count" id="count-against">0</span></h3>
+            <ul id="ev-against" class="stack"></ul>
+          </article>
+          <article>
+            <h3>Unknowns <span class="count" id="count-unknowns">0</span></h3>
+            <ul id="unknowns" class="stack"></ul>
+          </article>
+          <article>
+            <h3>Predictions <span class="count" id="count-predictions">0</span></h3>
+            <ul id="predictions" class="stack"></ul>
+          </article>
+        </div>
+        <section class="summary-card">
+          <h3>Belief</h3>
+          <p class="summary" id="summary"></p>
+        </section>
+      </section>
+    </main>
+
+    <aside class="log-pane">
+      <header>
+        <h2>log</h2>
+        <span id="log-meta"></span>
+      </header>
+      <ol id="commit-log"></ol>
+      <section id="detail" class="detail hidden">
+        <div class="detail-head">
+          <h2 id="detail-title">diff</h2>
+          <button type="button" class="ghost" id="detail-close">close</button>
+        </div>
+        <div id="detail-body" class="detail-body"></div>
+      </section>
+    </aside>
+  </div>
+  <div id="overlay" class="overlay hidden" role="status">
+    <div class="overlay-card">
+      <div class="spinner" aria-hidden="true"></div>
+      <p class="serif" id="overlay-title">Surveying the internet</p>
+      <p class="hint" id="overlay-sub">Grok is searching the web and X… <span id="elapsed">0s</span></p>
+    </div>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

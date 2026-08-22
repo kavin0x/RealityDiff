@@ -1,0 +1,45 @@
+[project]
+name = "realitydiff"
+version = "0.2.0"
+description = "Git for beliefs — living claims that watch the internet and version confidence."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "httpx>=0.28.0",
+    "pydantic>=2.10.0",
+    "uvicorn[standard]>=0.34.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+]
+
+[project.scripts]
+realitydiff = "realitydiff.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/realitydiff"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/realitydiff/static/index.html" = "realitydiff/static/index.html"
+"src/realitydiff/static/styles.css" = "realitydiff/static/styles.css"
+"src/realitydiff/static/app.js" = "realitydiff/static/app.js"
+"src/realitydiff/static/favicon.svg" = "realitydiff/static/favicon.svg"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.uv]
+package = true
