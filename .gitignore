@@ -220,3 +220,5 @@ __marimo__/
 # Reality Diff local belief store
 data/*.sqlite
 data/*.sqlite-journal
+data/*.sqlite-shm
+data/*.sqlite-wal

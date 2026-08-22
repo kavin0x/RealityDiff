@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS claims (
     watch_interval_seconds INTEGER NOT NULL DEFAULT 300,
     head TEXT,
     last_watched_at TEXT,
-    working_json TEXT
+    working_json TEXT,
+    last_response_id TEXT,
+    compaction_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS commits (
@@ -55,10 +57,18 @@ class BeliefStore:
             self._conn.execute("PRAGMA busy_timeout=5000")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(SCHEMA)
+            self._migrate()
             self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
+
+    def _migrate(self) -> None:
+        cols = {row[1] for row in self._conn.execute("PRAGMA table_info(claims)").fetchall()}
+        if "last_response_id" not in cols:
+            self._conn.execute("ALTER TABLE claims ADD COLUMN last_response_id TEXT")
+        if "compaction_json" not in cols:
+            self._conn.execute("ALTER TABLE claims ADD COLUMN compaction_json TEXT")
 
     def create_claim(self, statement: str, *, claim_id: str | None = None) -> ClaimRecord:
         created = utcnow()
@@ -67,8 +77,11 @@ class BeliefStore:
         with self._lock:
             self._conn.execute(
                 """
-                INSERT INTO claims (id, created_at, title, watching, watch_interval_seconds, head, working_json)
-                VALUES (?, ?, ?, 1, 300, NULL, ?)
+                INSERT INTO claims (
+                    id, created_at, title, watching, watch_interval_seconds, head, working_json,
+                    last_response_id, compaction_json
+                )
+                VALUES (?, ?, ?, 1, 300, NULL, ?, NULL, NULL)
                 """,
                 (record.id, record.created_at.isoformat(), record.title, None),
             )
@@ -102,6 +115,20 @@ class BeliefStore:
     def mark_watched(self, claim_id: str, when: datetime | None = None) -> None:
         stamp = (when or utcnow()).isoformat()
         self._conn.execute("UPDATE claims SET last_watched_at = ? WHERE id = ?", (stamp, claim_id))
+        self._conn.commit()
+
+    def set_model_cache(
+        self,
+        claim_id: str,
+        *,
+        response_id: str | None = None,
+        compaction: dict | None = None,
+    ) -> None:
+        payload = json.dumps(compaction) if compaction else None
+        self._conn.execute(
+            "UPDATE claims SET last_response_id = ?, compaction_json = ? WHERE id = ?",
+            (response_id, payload, claim_id),
+        )
         self._conn.commit()
 
     def working_state(self, claim_id: str) -> ClaimState | None:
@@ -213,6 +240,8 @@ class BeliefStore:
             last_watched_at=datetime.fromisoformat(row["last_watched_at"])
             if row["last_watched_at"]
             else None,
+            last_response_id=row["last_response_id"] if "last_response_id" in row.keys() else None,
+            compaction_json=row["compaction_json"] if "compaction_json" in row.keys() else None,
         )
 
     def _commit_from_row(self, row: sqlite3.Row) -> Commit:

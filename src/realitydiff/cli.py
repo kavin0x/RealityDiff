@@ -32,6 +32,8 @@ def main(argv: list[str] | None = None) -> int:
     watch_p = sub.add_parser("watch", help="Search for new evidence and maybe commit")
     watch_p.add_argument("claim_id")
 
+    sub.add_parser("watch-all", help="Watch every due claim once (used by the installed service)")
+
     log_p = sub.add_parser("log", help="Commit history")
     log_p.add_argument("claim_id")
 
@@ -60,6 +62,13 @@ def main(argv: list[str] | None = None) -> int:
     serve_p.add_argument("--host", default="0.0.0.0")
     serve_p.add_argument("--port", type=int, default=8000)
 
+    svc = sub.add_parser("service", help="Install a background timer that runs claim.watch()")
+    svc_sub = svc.add_subparsers(dest="service_cmd", required=True)
+    inst = svc_sub.add_parser("install", help="Install a LaunchAgent / systemd user timer / Windows task")
+    inst.add_argument("--interval", type=int, default=300, help="Seconds between watches (min 30)")
+    svc_sub.add_parser("uninstall", help="Remove the background watch service")
+    svc_sub.add_parser("status", help="Show whether the service is installed")
+
     args = parser.parse_args(argv)
     if args.cmd == "serve":
         import uvicorn
@@ -67,7 +76,22 @@ def main(argv: list[str] | None = None) -> int:
         uvicorn.run("realitydiff.api:create_app", host=args.host, port=args.port, factory=True, reload=False)
         return 0
 
+    if args.cmd == "service":
+        from realitydiff.schedule import install, status, uninstall
+
+        if args.service_cmd == "install":
+            _print(install(args.interval, db=DEFAULT_DB))
+            return 0
+        if args.service_cmd == "uninstall":
+            _print(uninstall())
+            return 0
+        _print(status())
+        return 0
+
     engine = _engine()
+    if args.cmd == "watch-all":
+        _print([item.model_dump(mode="json") for item in engine.watch_due()])
+        return 0
     if args.cmd == "open":
         living, commit = engine.open_claim(args.statement)
         _print({"claim_id": living.id, "commit": commit.id, "confidence": commit.new_confidence, "reason": commit.reason})

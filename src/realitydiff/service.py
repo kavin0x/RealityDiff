@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import logging
 import threading
+import time
 from pathlib import Path
 
 from realitydiff.claim import Claim
@@ -10,11 +13,7 @@ from realitydiff.reasoner import Reasoner
 from realitydiff.store import BeliefStore
 from realitydiff.xai import LanguageModel, XAIClient
 
-
-class WatchBusy(RuntimeError):
-    def __init__(self, claim_id: str) -> None:
-        super().__init__(f"Watch already running for {claim_id}")
-        self.claim_id = claim_id
+log = logging.getLogger("realitydiff.service")
 
 
 class RealityDiff:
@@ -41,7 +40,7 @@ class RealityDiff:
             raise ValueError("Claim is too short")
         record = self.store.create_claim(statement)
         try:
-            state, reason = self.reasoner.initialize(statement)
+            state, reason, meta = self.reasoner.initialize(statement, conv_id=record.id)
             commit = Commit.create(
                 claim_id=record.id,
                 parent_id=None,
@@ -52,6 +51,11 @@ class RealityDiff:
                 previous_confidence=None,
             )
             self.store.append_commit(commit)
+            self.store.set_model_cache(
+                record.id,
+                response_id=meta.get("response_id"),
+                compaction=meta.get("compaction"),
+            )
             return self.claim(record.id), commit
         except Exception:
             self.store.delete_claim(record.id)
@@ -60,16 +64,44 @@ class RealityDiff:
     def watch(self, claim_id: str, *, author: str = "watcher") -> WatchResult:
         lock = self._lock_for(claim_id)
         if not lock.acquire(blocking=False):
-            raise WatchBusy(claim_id)
+            return WatchResult(
+                claim_id=claim_id,
+                changed=False,
+                in_progress=True,
+                detail="Watch already running; UI stays usable.",
+            )
         try:
             living = self.claim(claim_id)
             head = living.head
             if head is None:
                 raise RuntimeError("Claim has no commits yet")
-            new_state, reason, changed = self.reasoner.update(living.record.title, head.state)
+            compaction = None
+            if living.record.compaction_json:
+                try:
+                    compaction = json.loads(living.record.compaction_json)
+                except json.JSONDecodeError:
+                    compaction = None
+            new_state, reason, changed, meta = self.reasoner.update(
+                living.record.title,
+                head.state,
+                conv_id=living.id,
+                previous_response_id=living.record.last_response_id,
+                compaction=compaction,
+            )
             self.store.mark_watched(claim_id)
+            self.store.set_model_cache(
+                claim_id,
+                response_id=meta.get("response_id"),
+                compaction=meta.get("compaction") or compaction,
+            )
+            cached = int(meta.get("cached_tokens") or 0)
             if not changed:
-                return WatchResult(claim_id=claim_id, changed=False, detail=reason)
+                return WatchResult(
+                    claim_id=claim_id,
+                    changed=False,
+                    detail=reason,
+                    cached_tokens=cached,
+                )
             self.store.set_working_state(claim_id, new_state)
             commit = living.commit(
                 "Watch update",
@@ -83,9 +115,32 @@ class RealityDiff:
                 to_id=commit.id,
                 reason=reason,
             )
-            return WatchResult(claim_id=claim_id, changed=True, commit=commit, diff=diff, detail=reason)
+            return WatchResult(
+                claim_id=claim_id,
+                changed=True,
+                commit=commit,
+                diff=diff,
+                detail=reason,
+                cached_tokens=cached,
+            )
         finally:
             lock.release()
+
+    def watch_due(self, *, author: str = "watcher") -> list[WatchResult]:
+        results: list[WatchResult] = []
+        now = time.time()
+        for record in self.store.list_claims():
+            if not record.watching or not record.head:
+                continue
+            last = record.last_watched_at.timestamp() if record.last_watched_at else 0.0
+            if now - last < record.watch_interval_seconds:
+                continue
+            try:
+                results.append(self.watch(record.id, author=author))
+            except Exception:
+                log.exception("watch failed for %s", record.id)
+                self.store.mark_watched(record.id)
+        return results
 
     def _lock_for(self, claim_id: str) -> threading.Lock:
         with self._watch_meta:

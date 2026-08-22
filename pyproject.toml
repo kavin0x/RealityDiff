@@ -1,6 +1,6 @@
 [project]
 name = "realitydiff"
-version = "0.2.0"
+version = "0.3.0"
 description = "Git for beliefs — living claims that watch the internet and version confidence."
 readme = "README.md"
 requires-python = ">=3.11"

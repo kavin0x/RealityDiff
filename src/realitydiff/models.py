@@ -62,6 +62,15 @@ class Unknown(BaseModel):
         )
 
 
+class Citation(BaseModel):
+    url: str
+    title: str = ""
+
+    @classmethod
+    def make(cls, url: str, title: str = "") -> "Citation":
+        return cls(url=url.strip(), title=(title or "").strip())
+
+
 class Prediction(BaseModel):
     id: str
     statement: str
@@ -95,6 +104,7 @@ class ClaimState(BaseModel):
     evidence_against: list[Evidence] = Field(default_factory=list)
     unknowns: list[Unknown] = Field(default_factory=list)
     predictions: list[Prediction] = Field(default_factory=list)
+    citations: list[Citation] = Field(default_factory=list)
     summary: str = ""
 
     @field_validator("confidence")
@@ -103,7 +113,11 @@ class ClaimState(BaseModel):
         return round(max(0.0, min(100.0, value)), 1)
 
     def tree_hash(self) -> str:
-        return object_id("tree", self.model_dump(mode="json"))
+        data = self.model_dump(mode="json")
+        for bucket in ("evidence_for", "evidence_against"):
+            for item in data.get(bucket) or []:
+                item.pop("retrieved_at", None)
+        return object_id("tree", data)
 
     def all_evidence(self) -> list[tuple[str, Evidence]]:
         return [("for", item) for item in self.evidence_for] + [
@@ -171,6 +185,8 @@ class ClaimRecord(BaseModel):
     watch_interval_seconds: int = 300
     head: str | None = None
     last_watched_at: datetime | None = None
+    last_response_id: str | None = None
+    compaction_json: str | None = None
 
 
 class FieldChange(BaseModel):
@@ -216,3 +232,5 @@ class WatchResult(BaseModel):
     commit: Commit | None = None
     diff: ClaimDiff | None = None
     detail: str = ""
+    in_progress: bool = False
+    cached_tokens: int = 0

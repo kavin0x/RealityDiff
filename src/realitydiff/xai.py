@@ -10,14 +10,15 @@ import httpx
 
 
 DEFAULT_MODELS = (
+    "grok-4.3",  # 1M context window; cheapest cached-input path among current Grok 4.x
     "grok-4.5",
-    "grok-4.3",
     "grok-4.20-0309-non-reasoning",
     "grok-4.6",
 )
 
 JSON_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 TRAILING_COMMA = re.compile(r",(\s*[}\]])")
+COMPACT_AFTER_TOKENS = 6_000
 
 
 class XAIError(RuntimeError):
@@ -25,11 +26,21 @@ class XAIError(RuntimeError):
 
 
 class LanguageModel(Protocol):
-    def complete(self, prompt: str, *, search: bool = False) -> dict[str, Any]: ...
+    def complete(
+        self,
+        prompt: str,
+        *,
+        search: bool = False,
+        system: str | None = None,
+        conv_id: str | None = None,
+        cache_key: str | None = None,
+        previous_response_id: str | None = None,
+        compaction: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
 
 
 class XAIClient:
-    """xAI Responses API with live web_search / x_search tools."""
+    """xAI Responses API with live web_search / x_search, prompt cache, then fallback."""
 
     def __init__(
         self,
@@ -47,60 +58,180 @@ class XAIClient:
         self.timeout = timeout
         self.last_model: str | None = None
 
-    def complete(self, prompt: str, *, search: bool = False) -> dict[str, Any]:
+    def complete(
+        self,
+        prompt: str,
+        *,
+        search: bool = False,
+        system: str | None = None,
+        conv_id: str | None = None,
+        cache_key: str | None = None,
+        previous_response_id: str | None = None,
+        compaction: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         last_error: Exception | None = None
+        sticky = conv_id or cache_key or "realitydiff"
+        attempts = _request_plans(previous_response_id=previous_response_id, compaction=compaction)
         for model in self.models:
-            for attempt in range(3):
-                try:
-                    payload: dict[str, Any] = {
-                        "model": model,
-                        "store": False,
-                        "input": [{"role": "user", "content": prompt}],
-                    }
-                    if search:
-                        payload["tools"] = [{"type": "web_search"}, {"type": "x_search"}]
-                    response = httpx.post(
-                        f"{self.base_url}/responses",
-                        headers={
+            for plan in attempts:
+                for retry in range(3):
+                    try:
+                        payload = _build_payload(
+                            model=model,
+                            prompt=prompt,
+                            system=system,
+                            search=search,
+                            cache_key=sticky,
+                            previous_response_id=plan.get("previous_response_id"),
+                            compaction=plan.get("compaction"),
+                            store=plan["store"],
+                        )
+                        headers = {
                             "Authorization": f"Bearer {self.api_key}",
                             "Content-Type": "application/json",
-                        },
-                        json=payload,
-                        timeout=self.timeout,
-                    )
-                    if response.status_code == 429:
-                        last_error = XAIError(response.text)
-                        time.sleep(2 ** attempt)
-                        continue
-                    if response.status_code >= 400:
-                        last_error = XAIError(f"{model} HTTP {response.status_code}: {response.text[:500]}")
-                        break
-                    body = response.json()
-                    if body.get("error"):
-                        last_error = XAIError(str(body.get("error")))
-                        break
-                    if body.get("status") == "failed":
-                        last_error = XAIError(str(body.get("incomplete_details") or body))
-                        time.sleep(2 ** attempt)
-                        continue
-                    text = extract_output_text(body)
-                    if not text.strip():
-                        last_error = XAIError(f"{model} returned empty output")
-                        time.sleep(2 ** attempt)
-                        continue
-                    citations = extract_citations(body)
-                    self.last_model = model
-                    return {
-                        "model": model,
-                        "text": text,
-                        "citations": citations,
-                        "raw": body,
-                    }
-                except httpx.HTTPError as exc:
-                    last_error = exc
-                    time.sleep(2 ** attempt)
-            # try next model
+                            "x-grok-conv-id": sticky,
+                        }
+                        response = httpx.post(
+                            f"{self.base_url}/responses",
+                            headers=headers,
+                            json=payload,
+                            timeout=self.timeout,
+                        )
+                        if response.status_code == 429:
+                            last_error = XAIError(response.text)
+                            time.sleep(2**retry)
+                            continue
+                        if response.status_code >= 400:
+                            last_error = XAIError(f"{model} HTTP {response.status_code}: {response.text[:500]}")
+                            break
+                        body = response.json()
+                        if body.get("error"):
+                            last_error = XAIError(str(body.get("error")))
+                            break
+                        if body.get("status") == "failed":
+                            last_error = XAIError(str(body.get("incomplete_details") or body))
+                            time.sleep(2**retry)
+                            continue
+                        text = extract_output_text(body)
+                        if not text.strip():
+                            last_error = XAIError(f"{model} returned empty output")
+                            time.sleep(2**retry)
+                            continue
+                        self.last_model = model
+                        result = {
+                            "model": model,
+                            "text": text,
+                            "citations": extract_citations(body),
+                            "response_id": body.get("id"),
+                            "cached_tokens": _cached_tokens(body),
+                            "input_tokens": _input_tokens(body),
+                            "compaction": None,
+                            "raw": body,
+                        }
+                        if result["input_tokens"] >= COMPACT_AFTER_TOKENS:
+                            result["compaction"] = self._compact(model, payload["input"], sticky)
+                        return result
+                    except httpx.HTTPError as exc:
+                        last_error = exc
+                        time.sleep(2**retry)
         raise XAIError(f"xAI request failed: {last_error}")
+
+    def _compact(self, model: str, messages: list[dict[str, Any]], conv_id: str) -> dict[str, Any] | None:
+        try:
+            response = httpx.post(
+                f"{self.base_url}/responses/compact",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                    "x-grok-conv-id": conv_id,
+                },
+                json={"model": model, "input": messages},
+                timeout=self.timeout,
+            )
+            if response.status_code >= 400:
+                return None
+            body = response.json()
+            items = body.get("output") or []
+            if items and items[0].get("type") == "compaction" and items[0].get("encrypted_content"):
+                return items[0]
+        except httpx.HTTPError:
+            return None
+        return None
+
+
+def _request_plans(
+    *,
+    previous_response_id: str | None,
+    compaction: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    plans: list[dict[str, Any]] = []
+    if previous_response_id:
+        plans.append({"store": True, "previous_response_id": previous_response_id, "compaction": None})
+    if compaction and compaction.get("encrypted_content"):
+        plans.append({"store": True, "previous_response_id": None, "compaction": compaction})
+    plans.append({"store": True, "previous_response_id": None, "compaction": None})
+    plans.append({"store": False, "previous_response_id": None, "compaction": None})
+    # Deduplicate identical plans while preserving order.
+    seen: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    for plan in plans:
+        key = json.dumps(
+            {
+                "store": plan["store"],
+                "prev": plan.get("previous_response_id"),
+                "cmp": bool(plan.get("compaction")),
+            },
+            sort_keys=True,
+        )
+        if key not in seen:
+            seen.add(key)
+            unique.append(plan)
+    return unique
+
+
+def _build_payload(
+    *,
+    model: str,
+    prompt: str,
+    system: str | None,
+    search: bool,
+    cache_key: str,
+    previous_response_id: str | None,
+    compaction: dict[str, Any] | None,
+    store: bool,
+) -> dict[str, Any]:
+    messages: list[dict[str, Any]] = []
+    if previous_response_id:
+        messages.append({"role": "user", "content": prompt})
+    elif compaction:
+        messages.append(compaction)
+        messages.append({"role": "user", "content": prompt})
+    else:
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+    payload: dict[str, Any] = {
+        "model": model,
+        "store": store,
+        "input": messages,
+        "prompt_cache_key": cache_key,
+    }
+    if previous_response_id:
+        payload["previous_response_id"] = previous_response_id
+    if search:
+        payload["tools"] = [{"type": "web_search"}, {"type": "x_search"}]
+    return payload
+
+
+def _cached_tokens(body: dict[str, Any]) -> int:
+    usage = body.get("usage") or {}
+    details = usage.get("input_tokens_details") or usage.get("prompt_tokens_details") or {}
+    return int(details.get("cached_tokens") or 0)
+
+
+def _input_tokens(body: dict[str, Any]) -> int:
+    usage = body.get("usage") or {}
+    return int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
 
 
 def extract_output_text(body: dict[str, Any]) -> str:
@@ -133,6 +264,8 @@ def extract_citations(body: dict[str, Any]) -> list[dict[str, str]]:
                 url = annotation.get("url") or annotation.get("href") or ""
                 title = annotation.get("title") or annotation.get("text") or ""
                 add(url, title)
+            if part.get("type") in {"citation", "url_citation"}:
+                add(part.get("url") or "", part.get("title") or "")
         citations = item.get("citations") or []
         if isinstance(citations, list):
             for citation in citations:

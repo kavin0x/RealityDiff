@@ -5,4 +5,4 @@ from realitydiff.models import ClaimState, Commit
 from realitydiff.service import RealityDiff
 
 __all__ = ["Claim", "ClaimState", "Commit", "RealityDiff"]
-__version__ = "0.2.0"
+__version__ = "0.3.0"

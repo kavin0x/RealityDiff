@@ -13,7 +13,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from realitydiff import __version__
 from realitydiff.models import BlameReport, ClaimDiff, ClaimRecord, Commit, WatchResult
-from realitydiff.service import RealityDiff, WatchBusy
+from realitydiff.schedule import install as install_service
+from realitydiff.schedule import status as service_status
+from realitydiff.schedule import uninstall as uninstall_service
+from realitydiff.service import RealityDiff
 from realitydiff.watcher import WatchLoop
 from realitydiff.xai import XAIError
 
@@ -37,6 +40,10 @@ class CommitBody(BaseModel):
 class RevertBody(BaseModel):
     sha: str = Field(min_length=7, max_length=64)
     author: str = Field(default="user", max_length=80)
+
+
+class ServiceBody(BaseModel):
+    interval_seconds: int = Field(default=300, ge=30, le=86_400)
 
 
 class WatchConfigBody(BaseModel):
@@ -160,13 +167,49 @@ def create_app(
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    @app.get("/api/claims/{claim_id}/at/{sha}")
+    def claim_at(claim_id: str, sha: str) -> dict:
+        living = _claim(engine, claim_id)
+        try:
+            commit = living._resolve(sha)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if commit is None:
+            raise HTTPException(404, f"Unknown commit {sha}")
+        return {
+            "claim": living.refresh().model_dump(mode="json"),
+            "commit": commit.model_dump(mode="json"),
+            "parent_id": commit.parent_id,
+            "is_head": living.head is not None and living.head.id == commit.id,
+            "browse": True,
+        }
+
+    @app.get("/api/claims/{claim_id}/tree")
+    def claim_tree(claim_id: str) -> dict:
+        living = _claim(engine, claim_id)
+        history = living.log()
+        nodes = []
+        for commit in reversed(history):
+            nodes.append(
+                {
+                    "id": commit.id,
+                    "parent_id": commit.parent_id,
+                    "message": commit.message,
+                    "author": commit.author,
+                    "created_at": commit.created_at.isoformat(),
+                    "confidence": commit.new_confidence,
+                    "previous_confidence": commit.previous_confidence,
+                    "reason": commit.reason,
+                    "is_head": living.head is not None and living.head.id == commit.id,
+                }
+            )
+        return {"claim_id": claim_id, "head": living.head.id if living.head else None, "nodes": nodes}
+
     @app.post("/api/claims/{claim_id}/watch")
     def claim_watch(claim_id: str) -> WatchResult:
         _claim(engine, claim_id)
         try:
             return engine.watch(claim_id, author="watcher")
-        except WatchBusy as exc:
-            raise HTTPException(409, str(exc)) from exc
         except XAIError as exc:
             raise HTTPException(502, f"Watch failed: {exc}") from exc
         except Exception as exc:
@@ -180,6 +223,24 @@ def create_app(
         record = engine.store.get_claim(claim_id)
         assert record is not None
         return record
+
+    @app.get("/api/service")
+    def get_service() -> dict:
+        return service_status()
+
+    @app.post("/api/service")
+    def put_service(body: ServiceBody) -> dict:
+        try:
+            return install_service(body.interval_seconds, db=DEFAULT_DB)
+        except Exception as exc:
+            raise HTTPException(500, f"Could not install watch service: {exc}") from exc
+
+    @app.delete("/api/service")
+    def drop_service() -> dict:
+        try:
+            return uninstall_service()
+        except Exception as exc:
+            raise HTTPException(500, f"Could not remove watch service: {exc}") from exc
 
     if STATIC.exists():
         app.mount("/static", StaticFiles(directory=STATIC), name="static")

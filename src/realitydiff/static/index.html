@@ -12,7 +12,7 @@
 <body>
   <div class="grain" aria-hidden="true"></div>
   <div class="app">
-    <aside class="rail">
+    <aside class="rail" id="rail">
       <header class="brand">
         <div class="mark">Δ</div>
         <div>
@@ -32,19 +32,25 @@
         <ul id="claim-list"></ul>
       </section>
     </aside>
+    <div class="gutter" data-side="rail" title="Drag to resize"></div>
 
     <main class="stage">
+      <div id="watch-status" class="watch-status hidden" role="status"></div>
       <div id="empty" class="empty">
         <p class="kicker">living claims</p>
         <p class="serif">Give it a claim.</p>
-        <p class="hint">The system creates a versioned belief object, then watches the internet. When evidence moves, confidence commits — like git, for what’s true.</p>
+        <p class="hint why">News feeds overwrite your memory. Reality Diff keeps a git history of a belief: what the internet said, how confident we were, and why that number moved. Diff two weeks, blame a confidence jump, or revert a rumor panic — useful when a claim is still unfolding and you need a trail, not a vibe.</p>
         <ol class="empty-steps">
           <li>open a testable claim</li>
-          <li>inspect for / against / unknowns</li>
-          <li>watch, diff, blame, or revert</li>
+          <li>inspect for / against / unknowns / citations</li>
+          <li>watch, diff, blame, browse a commit, or revert</li>
         </ol>
       </div>
       <section id="claim-view" class="hidden">
+        <div id="browse-banner" class="browse-banner hidden">
+          Browsing commit <span id="browse-sha"></span> — read-only snapshot.
+          <button type="button" class="ghost" id="browse-head">return to HEAD</button>
+        </div>
         <header class="claim-head">
           <div>
             <div class="kicker-row">
@@ -74,6 +80,17 @@
             <input type="checkbox" id="watching-toggle" />
             live watch
           </label>
+          <label class="watch-toggle" for="watch-interval">every
+            <select id="watch-interval">
+              <option value="60">1m</option>
+              <option value="300" selected>5m</option>
+              <option value="900">15m</option>
+              <option value="3600">1h</option>
+              <option value="21600">6h</option>
+              <option value="86400">1d</option>
+            </select>
+          </label>
+          <button type="button" id="service-btn" class="ghost">install timer service</button>
         </div>
         <div class="tree-grid">
           <article>
@@ -97,12 +114,17 @@
           <h3>Belief</h3>
           <p class="summary" id="summary"></p>
         </section>
+        <section class="summary-card">
+          <h3>Citations <span class="count" id="count-citations">0</span></h3>
+          <ul id="citations" class="stack"></ul>
+        </section>
       </section>
     </main>
+    <div class="gutter" data-side="log" title="Drag to resize"></div>
 
-    <aside class="log-pane">
+    <aside class="log-pane" id="log-pane">
       <header>
-        <h2>log</h2>
+        <h2>git tree</h2>
         <span id="log-meta"></span>
       </header>
       <ol id="commit-log"></ol>

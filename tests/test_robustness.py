@@ -1,6 +1,6 @@
 from realitydiff.xai import parse_json_object, XAIError
 from realitydiff.reasoner import _coerce_number
-from realitydiff.service import RealityDiff, WatchBusy
+from realitydiff.service import RealityDiff
 from realitydiff.store import BeliefStore
 from tests.test_git_beliefs import state, ts
 from realitydiff.models import Commit
@@ -48,7 +48,7 @@ def test_short_sha_and_open_rollback(tmp_path):
     assert found is not None and found.id == c1.id
 
     class Boom:
-        def complete(self, prompt, *, search=False):
+        def complete(self, prompt, *, search=False, **kwargs):
             raise RuntimeError("nope")
 
     engine = RealityDiff(BeliefStore(tmp_path / "db2.sqlite"), model=Boom())
@@ -66,10 +66,8 @@ def test_watch_busy(tmp_path):
     lock = engine._lock_for("cl_test")
     assert lock.acquire(blocking=False)
     try:
-        try:
-            engine.watch("cl_test")
-            assert False
-        except WatchBusy:
-            pass
+        result = engine.watch("cl_test")
+        assert result.in_progress is True
+        assert result.changed is False
     finally:
         lock.release()

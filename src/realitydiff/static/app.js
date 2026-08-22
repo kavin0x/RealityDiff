@@ -1,9 +1,11 @@
 const $ = (id) => document.getElementById(id);
 
 let currentId = null;
+let browseSha = null;
 let lastLog = [];
 let claimsCache = [];
 let overlayTimer = null;
+let watchingClaims = new Set();
 
 function errorMessage(data, fallback) {
   if (!data) return fallback;
@@ -67,6 +69,30 @@ function showOverlay(title, sub) {
 function hideOverlay() {
   clearInterval(overlayTimer);
   $("overlay").classList.add("hidden");
+}
+
+function setWatchStatus(text) {
+  const el = $("watch-status");
+  if (!text) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    return;
+  }
+  el.classList.remove("hidden");
+  el.textContent = text;
+}
+
+function parseRoute() {
+  const raw = location.hash.replace(/^#/, "");
+  if (!raw) return { id: null, sha: null };
+  const [id, sha] = raw.split("/");
+  return { id: id || null, sha: sha || null };
+}
+
+function setRoute(id, sha) {
+  currentId = id;
+  browseSha = sha || null;
+  location.hash = sha ? `${id}/${sha}` : id;
 }
 
 function evidenceItem(item) {
@@ -142,14 +168,30 @@ function renderClaimList() {
   });
 }
 
-async function selectClaim(id) {
+async function selectClaim(id, sha) {
   currentId = id;
-  location.hash = id;
+  browseSha = sha || null;
+  if (location.hash.replace(/^#/, "") !== (sha ? `${id}/${sha}` : id)) {
+    location.hash = sha ? `${id}/${sha}` : id;
+  }
   $("empty").classList.add("hidden");
   $("claim-view").classList.remove("hidden");
-  const data = await api(`/api/claims/${id}`, { timeoutMs: 15000 });
-  const head = data.head;
-  const state = head?.state || data.working;
+  let data;
+  let head;
+  let state;
+  let browsing = Boolean(sha);
+  if (sha) {
+    data = await api(`/api/claims/${id}/at/${sha}`, { timeoutMs: 15000 });
+    head = data.commit;
+    state = head?.state;
+    $("browse-banner").classList.remove("hidden");
+    $("browse-sha").textContent = (head?.id || sha).slice(0, 12);
+  } else {
+    data = await api(`/api/claims/${id}`, { timeoutMs: 15000 });
+    head = data.head;
+    state = head?.state || data.working;
+    $("browse-banner").classList.add("hidden");
+  }
   $("claim-id").textContent = data.claim.id;
   $("claim-title").textContent = state?.statement || data.claim.title;
   $("claim-refined").textContent = state?.refined_statement || "";
@@ -160,7 +202,11 @@ async function selectClaim(id) {
   $("watching-toggle").checked = Boolean(data.claim.watching);
   $("watching-chip").textContent = data.claim.watching ? "watching" : "paused";
   $("watching-chip").classList.toggle("off", !data.claim.watching);
-  $("dirty-chip").classList.toggle("hidden", !data.dirty);
+  $("dirty-chip").classList.toggle("hidden", browsing || !data.dirty);
+  const interval = String(data.claim.watch_interval_seconds || 300);
+  if ([...$("watch-interval").options].some((opt) => opt.value === interval)) {
+    $("watch-interval").value = interval;
+  }
   fillList($("ev-for"), state?.evidence_for || [], evidenceItem, $("count-for"));
   fillList($("ev-against"), state?.evidence_against || [], evidenceItem, $("count-against"));
   fillList($("unknowns"), state?.unknowns || [], (u) => {
@@ -174,22 +220,42 @@ async function selectClaim(id) {
       <span class="w">${p.due ? escapeHtml(p.due) : "no due date"}${p.how_to_falsify ? " · " + escapeHtml(p.how_to_falsify) : ""}</span>`;
     return li;
   }, $("count-predictions"));
+  const citations = state?.citations || collectCitations(state);
+  fillList($("citations"), citations, (c) => {
+    const li = document.createElement("li");
+    li.innerHTML = `<a class="src" href="${escapeAttr(c.url)}" target="_blank" rel="noreferrer">${escapeHtml(c.title || c.url)}</a>`;
+    return li;
+  }, $("count-citations"));
   $("summary").textContent = state?.summary || "";
   lastLog = await api(`/api/claims/${id}/log`, { timeoutMs: 15000 });
   const spark = [...lastLog].reverse().map((c) => c.new_confidence);
   renderSpark($("spark"), spark);
-  const prev = lastLog[1]?.new_confidence;
+  const viewed = lastLog.find((c) => c.id === head?.id) || lastLog[0];
+  const prev = viewed?.previous_confidence;
   const deltaEl = $("conf-delta");
   if (prev == null) {
-    deltaEl.textContent = "initial HEAD";
+    deltaEl.textContent = browsing ? "initial commit" : "initial HEAD";
     deltaEl.className = "conf-delta";
   } else {
     const d = Math.round((conf - prev) * 10) / 10;
     deltaEl.textContent = `${d >= 0 ? "+" : ""}${d} from previous commit`;
     deltaEl.className = "conf-delta " + (d > 0 ? "up" : d < 0 ? "down" : "");
   }
-  renderLog(lastLog);
+  renderLog(lastLog, head?.id);
   await refreshList();
+}
+
+function collectCitations(state) {
+  if (!state) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of [...(state.evidence_for || []), ...(state.evidence_against || [])]) {
+    if (item.source_url && !seen.has(item.source_url)) {
+      seen.add(item.source_url);
+      out.push({ url: item.source_url, title: item.source_title || item.source_url });
+    }
+  }
+  return out;
 }
 
 function fillList(ul, items, render, countEl) {
@@ -205,12 +271,15 @@ function fillList(ul, items, render, countEl) {
   items.forEach((item) => ul.appendChild(render(item)));
 }
 
-function renderLog(log) {
+function renderLog(log, activeSha) {
   $("log-meta").textContent = `${log.length} commits`;
   const ol = $("commit-log");
   ol.innerHTML = "";
-  log.forEach((c, i) => {
+  const chronological = [...log].reverse();
+  chronological.forEach((c, idx) => {
+    const newestFirstIndex = log.length - 1 - idx;
     const li = document.createElement("li");
+    if (activeSha && c.id === activeSha) li.classList.add("active");
     const prev = c.previous_confidence;
     let arrow = "";
     if (prev != null) {
@@ -218,16 +287,32 @@ function renderLog(log) {
       const cls = d > 0 ? "up" : d < 0 ? "down" : "";
       arrow = ` <span class="arrow ${cls}">${prev.toFixed(1)}% → ${c.new_confidence.toFixed(1)}%</span>`;
     }
-    li.innerHTML = `<span class="sha">${c.id.slice(0, 12)}</span>
-      <span class="msg">${escapeHtml(c.message)}${arrow}</span>
-      <span class="why">${escapeHtml((c.reason || "").slice(0, 220))}${(c.reason || "").length > 220 ? "…" : ""}</span>
-      <span class="status">${escapeHtml(c.author)} · ${relativeTime(c.created_at)}</span>`;
-    li.onclick = async () => {
-      if (i + 1 >= log.length) {
+    const glyph = idx === chronological.length - 1 ? "*" : "|";
+    const connector = idx === chronological.length - 1 ? "" : "\n|";
+    li.innerHTML = `<div class="git-node">
+      <span class="git-graph">${glyph}${connector}</span>
+      <div>
+        <span class="sha">${c.id.slice(0, 12)}${c.id === log[0]?.id ? " (HEAD)" : ""}</span>
+        <span class="msg">${escapeHtml(c.message)}${arrow}</span>
+        <span class="why">${escapeHtml((c.reason || "").slice(0, 220))}${(c.reason || "").length > 220 ? "…" : ""}</span>
+        <span class="status">${escapeHtml(c.author)} · ${relativeTime(c.created_at)}</span>
+        <div class="commit-actions">
+          <button type="button" class="ghost browse-commit">browse from this commit</button>
+          <button type="button" class="ghost diff-commit">diff</button>
+        </div>
+      </div>
+    </div>`;
+    li.querySelector(".browse-commit").onclick = (ev) => {
+      ev.stopPropagation();
+      selectClaim(currentId, c.id);
+    };
+    li.querySelector(".diff-commit").onclick = async (ev) => {
+      ev.stopPropagation();
+      if (newestFirstIndex + 1 >= log.length) {
         showDetail("root commit", formatDiffHtml(await api(`/api/claims/${currentId}/diff?b=${c.id}`)));
         return;
       }
-      const parent = log[i + 1];
+      const parent = log[newestFirstIndex + 1];
       const diff = await api(`/api/claims/${currentId}/diff?a=${parent.id}&b=${c.id}`);
       showDetail(`diff ${parent.id.slice(0, 8)}..${c.id.slice(0, 8)}`, formatDiffHtml(diff));
     };
@@ -270,6 +355,45 @@ function showDetail(title, html) {
   $("detail-body").innerHTML = html;
 }
 
+function restorePaneSizes() {
+  const rail = Number(localStorage.getItem("rd-rail-w") || 280);
+  const log = Number(localStorage.getItem("rd-log-w") || 340);
+  document.documentElement.style.setProperty("--rail-w", `${Math.max(200, rail)}px`);
+  document.documentElement.style.setProperty("--log-w", `${Math.max(240, log)}px`);
+}
+
+function enableResize() {
+  document.querySelectorAll(".gutter").forEach((gutter) => {
+    gutter.addEventListener("mousedown", (ev) => {
+      ev.preventDefault();
+      gutter.classList.add("dragging");
+      const side = gutter.dataset.side;
+      const startX = ev.clientX;
+      const startRail = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--rail-w")) || 280;
+      const startLog = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--log-w")) || 340;
+      const onMove = (move) => {
+        const dx = move.clientX - startX;
+        if (side === "rail") {
+          const next = Math.min(480, Math.max(200, startRail + dx));
+          document.documentElement.style.setProperty("--rail-w", `${next}px`);
+          localStorage.setItem("rd-rail-w", String(next));
+        } else {
+          const next = Math.min(560, Math.max(240, startLog - dx));
+          document.documentElement.style.setProperty("--log-w", `${next}px`);
+          localStorage.setItem("rd-log-w", String(next));
+        }
+      };
+      const onUp = () => {
+        gutter.classList.remove("dragging");
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    });
+  });
+}
+
 $("open-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const btn = $("open-btn");
@@ -294,23 +418,37 @@ $("open-form").addEventListener("submit", async (e) => {
 
 $("watch-btn").onclick = async () => {
   if (!currentId) return;
+  if (watchingClaims.has(currentId)) {
+    toast("Already watching this claim — you can keep browsing.");
+    return;
+  }
+  const watchingId = currentId;
+  const browseAtStart = browseSha;
   const btn = $("watch-btn");
+  watchingClaims.add(watchingId);
   setBusy(btn, true);
-  showOverlay("Watching the internet", "Looking for new evidence…");
+  setWatchStatus("claim.watch() running in the background. The rest of the UI stays usable.");
   try {
-    const result = await api(`/api/claims/${currentId}/watch`, { method: "POST" });
-    await selectClaim(currentId);
+    const result = await api(`/api/claims/${watchingId}/watch`, { method: "POST" });
+    if (result.in_progress) {
+      toast(result.detail || "Watch already running.");
+      return;
+    }
+    if (currentId === watchingId) {
+      await selectClaim(watchingId, browseAtStart);
+    }
     if (result.changed) {
       showDetail("watch diff", formatDiffHtml(result.diff));
       toast(result.detail || "Belief updated.");
     } else {
-      toast(result.detail || "No new evidence.");
+      toast(result.detail || "No meaningful change — dropped.");
     }
   } catch (err) {
     toast(err.message);
   } finally {
+    watchingClaims.delete(watchingId);
     setBusy(btn, false);
-    hideOverlay();
+    setWatchStatus("");
   }
 };
 
@@ -333,6 +471,16 @@ $("blame-btn").onclick = async () => {
 
 $("revert-btn").onclick = async () => {
   if (!currentId) return;
+  if (browseSha) {
+    if (!window.confirm(`Revert live HEAD toward browsed commit ${browseSha.slice(0, 12)}?`)) return;
+    const commit = await api(`/api/claims/${currentId}/revert`, {
+      method: "POST",
+      body: JSON.stringify({ sha: browseSha }),
+    });
+    await selectClaim(currentId);
+    toast("Reverted toward " + (commit.parent_id || "").slice(0, 12));
+    return;
+  }
   if (lastLog.length < 2) {
     toast("Nothing to revert to.");
     return;
@@ -347,14 +495,53 @@ $("revert-btn").onclick = async () => {
   toast("Reverted toward " + (commit.parent_id || "").slice(0, 12));
 };
 
-$("watching-toggle").onchange = async () => {
+async function saveWatchConfig() {
   if (!currentId) return;
+  await api(`/api/claims/${currentId}/watching`, {
+    method: "POST",
+    body: JSON.stringify({
+      watching: $("watching-toggle").checked,
+      interval_seconds: Number($("watch-interval").value),
+    }),
+  });
+}
+
+$("watching-toggle").onchange = async () => {
   try {
-    await api(`/api/claims/${currentId}/watching`, {
+    await saveWatchConfig();
+    await selectClaim(currentId, browseSha);
+  } catch (err) {
+    toast(err.message);
+  }
+};
+
+$("watch-interval").onchange = async () => {
+  try {
+    await saveWatchConfig();
+    toast("Watch interval saved for this claim.");
+  } catch (err) {
+    toast(err.message);
+  }
+};
+
+$("service-btn").onclick = async () => {
+  try {
+    const status = await api("/api/service", { timeoutMs: 8000 });
+    if (status.installed === "true") {
+      if (!window.confirm("Uninstall the background watch service?")) return;
+      await api("/api/service", { method: "DELETE", timeoutMs: 15000 });
+      $("service-btn").textContent = "install timer service";
+      toast("Background timer removed.");
+      return;
+    }
+    const interval = Number($("watch-interval").value || 300);
+    await api("/api/service", {
       method: "POST",
-      body: JSON.stringify({ watching: $("watching-toggle").checked }),
+      timeoutMs: 15000,
+      body: JSON.stringify({ interval_seconds: interval }),
     });
-    await selectClaim(currentId);
+    $("service-btn").textContent = "remove timer service";
+    toast(`Installed a system timer that runs claim.watch() every ${interval}s.`);
   } catch (err) {
     toast(err.message);
   }
@@ -366,17 +553,28 @@ $("copy-id").onclick = async () => {
   toast("Copied " + currentId);
 };
 
+$("browse-head").onclick = () => {
+  if (currentId) selectClaim(currentId);
+};
+
 $("detail-close").onclick = () => $("detail").classList.add("hidden");
 $("claim-filter").addEventListener("input", renderClaimList);
 
 window.addEventListener("hashchange", () => {
-  const id = location.hash.replace(/^#/, "");
-  if (id && id !== currentId) selectClaim(id).catch((err) => toast(err.message));
+  const { id, sha } = parseRoute();
+  if (id && (id !== currentId || sha !== browseSha)) selectClaim(id, sha).catch((err) => toast(err.message));
 });
+
+restorePaneSizes();
+enableResize();
+
+api("/api/service", { timeoutMs: 8000 }).then((status) => {
+  if (status.installed === "true") $("service-btn").textContent = "remove timer service";
+}).catch(() => {});
 
 refreshList()
   .then(() => {
-    const id = location.hash.replace(/^#/, "");
-    if (id) return selectClaim(id);
+    const { id, sha } = parseRoute();
+    if (id) return selectClaim(id, sha);
   })
   .catch((err) => toast(err.message));

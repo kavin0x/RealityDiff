@@ -38,6 +38,17 @@ def test_http_git_surface(tmp_path):
         assert home.status_code == 200
         assert b"Reality Diff" in home.content
         assert b"claim.watch()" in home.content
+        assert b"News feeds overwrite your memory" in home.content
+        app_js = client.get("/static/app.js")
+        assert app_js.status_code == 200
+        assert b"browse from this commit" in app_js.content
+        tree = client.get(f"/api/claims/{claim_id}/tree")
+        assert tree.status_code == 200
+        assert tree.json()["nodes"]
+        snapshot = client.get(f"/api/claims/{claim_id}/at/{log[0]['id']}")
+        assert snapshot.status_code == 200
+        assert snapshot.json()["browse"] is True
+        assert snapshot.json()["commit"]["id"] == log[0]["id"]
         short = client.get(f"/api/claims/{claim_id}/diff", params={"a": log[1]["id"][:10], "b": log[0]["id"][:10]})
         assert short.status_code == 200
         assert short.json()["confidence_delta"] == 16

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 
 from realitydiff.models import WatchResult
 from realitydiff.service import RealityDiff
@@ -40,17 +39,4 @@ class WatchLoop:
             self._stop.wait(self.tick_seconds)
 
     def _tick(self) -> list[WatchResult]:
-        results: list[WatchResult] = []
-        now = time.time()
-        for record in self.engine.store.list_claims():
-            if not record.watching or not record.head:
-                continue
-            last = record.last_watched_at.timestamp() if record.last_watched_at else 0.0
-            if now - last < record.watch_interval_seconds:
-                continue
-            try:
-                results.append(self.engine.watch(record.id, author="watcher"))
-            except Exception:
-                log.exception("watch failed for %s", record.id)
-                self.engine.store.mark_watched(record.id)
-        return results
+        return self.engine.watch_due(author="watcher")
