@@ -38,6 +38,7 @@ uv run realitydiff serve
 Open http://localhost:8000
 
 ```bash
+# If you prefer a CLI/Are using an Agent
 uv run realitydiff open "Apple is going to replace Siri with an LLM."
 uv run realitydiff watch <claim_id>
 uv run realitydiff log <claim_id>
@@ -56,7 +57,7 @@ uv run realitydiff service status
 uv run realitydiff service uninstall
 ```
 
-The UI has the same control: pick **every 1m / 5m / 15m / 1h / 6h / 1d**, then **install timer service**. `claim.watch()` does not lock the rest of the app.
+The UI has the same control: pick **every 1m / 5m / 15m / 1h / 6h / 1d / etc**, then **install timer service**. `claim.watch()` does not lock the rest of the app.
 
 ## HTTP
 
