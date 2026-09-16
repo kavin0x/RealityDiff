@@ -17,7 +17,7 @@ Give it a claim:
 
 The system creates a living claim object — evidence for, evidence against, citations, unknowns, predictions, confidence — then watches the internet. When **meaningful** new evidence appears, confidence moves and the reason is committed. Cosmetic rewrites are dropped.
 
-```
+```python
 claim.commit()
 claim.diff()
 claim.blame()
@@ -35,7 +35,7 @@ uv sync --extra dev
 uv run realitydiff serve
 ```
 
-Open http://localhost:8000
+Open <http://localhost:8000>
 
 ```bash
 uv run realitydiff open "Apple is going to replace Siri with an LLM."
