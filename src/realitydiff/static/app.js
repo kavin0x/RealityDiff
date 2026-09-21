@@ -6,6 +6,7 @@ let lastLog = [];
 let claimsCache = [];
 let overlayTimer = null;
 let watchingClaims = new Set();
+let listStatus = localStorage.getItem("rd-list-status") || "all";
 
 function errorMessage(data, fallback) {
   if (!data) return fallback;
@@ -95,10 +96,18 @@ function setRoute(id, sha) {
   location.hash = sha ? `${id}/${sha}` : id;
 }
 
+function weightPercent(weight) {
+  const n = Number(weight);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, Math.round(n * 100)));
+}
+
 function evidenceItem(item) {
   const li = document.createElement("li");
   const notes = item.notes ? `<span class="notes">${escapeHtml(item.notes)}</span>` : "";
+  const pct = weightPercent(item.weight);
   li.innerHTML = `<div>${escapeHtml(item.statement)}</div>
+    <span class="weight" aria-hidden="true"><span class="weight-fill" style="width:${pct}%"></span></span>
     <span class="w">weight ${Number(item.weight).toFixed(2)}</span>
     ${item.source_url ? `<a class="src" href="${escapeAttr(item.source_url)}" target="_blank" rel="noreferrer">${escapeHtml(item.source_title || item.source_url)}</a>` : ""}
     ${notes}`;
@@ -150,20 +159,75 @@ function renderSpark(el, values) {
 async function refreshList() {
   claimsCache = await api("/api/claims", { timeoutMs: 15000 });
   renderClaimList();
-  if (!currentId && claimsCache[0]) selectClaim(claimsCache[0].id);
+  if (!currentId && !parseRoute().id && claimsCache[0]) selectClaim(claimsCache[0].id);
+}
+
+function matchesClaim(claim, query, status) {
+  const q = String(query || "").toLowerCase();
+  const textOk = !q || (claim.title || "").toLowerCase().includes(q) || String(claim.id || "").includes(q);
+  if (!textOk) return false;
+  if (status === "open") return !claim.closed;
+  if (status === "closed") return Boolean(claim.closed);
+  return true;
+}
+
+function visibleClaims() {
+  const q = $("claim-filter") ? $("claim-filter").value : "";
+  return claimsCache.filter((c) => matchesClaim(c, q, listStatus));
 }
 
 function renderClaimList() {
   const q = ($("claim-filter").value || "").toLowerCase();
   const ul = $("claim-list");
   ul.innerHTML = "";
-  claimsCache.filter((c) => !q || (c.title || "").toLowerCase().includes(q) || c.id.includes(q)).forEach((c) => {
+  document.querySelectorAll("#status-filter [data-status]").forEach((btn) => {
+    const status = btn.dataset.status;
+    btn.classList.toggle("on", status === listStatus);
+    btn.setAttribute("aria-selected", status === listStatus ? "true" : "false");
+    const badge = btn.querySelector(".seg-n");
+    if (badge) badge.textContent = String(claimsCache.filter((c) => matchesClaim(c, q, status)).length);
+  });
+  const rows = claimsCache.filter((c) => matchesClaim(c, q, listStatus));
+  const heads = $("heads-count");
+  if (heads) heads.textContent = String(rows.length);
+  if (!rows.length) {
     const li = document.createElement("li");
+    li.className = "empty-item";
+    li.textContent = claimsCache.length ? "No claims match." : "No claims yet.";
+    ul.appendChild(li);
+    return;
+  }
+  rows.forEach((c) => {
+    const li = document.createElement("li");
+    li.tabIndex = 0;
+    li.dataset.id = c.id;
     if (c.id === currentId) li.classList.add("active");
+    if (c.closed) li.classList.add("closed");
+    if (c.outcome_verdict) li.classList.add(c.outcome_verdict);
+    const conf = c.confidence == null ? 0 : Number(c.confidence);
+    const label = c.closed ? "closed · " + escapeHtml(c.outcome_verdict || "") : (c.confidence == null ? "—" : conf.toFixed(1) + "%");
+    const watched = c.last_watched_at ? ` · watched ${escapeHtml(relativeTime(c.last_watched_at))}` : "";
     li.innerHTML = `<div>${escapeHtml(c.title)}</div>
-      <div class="claim-meta"><span>${c.confidence == null ? "—" : c.confidence.toFixed(1) + "%"}</span>
-      <span>${c.commit_count} commits</span></div>`;
-    li.onclick = () => selectClaim(c.id);
+      <div class="claim-meta"><span class="meter" aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, conf))}%"></span></span>
+      <span>${label}</span>
+      <span>${c.commit_count} commits${watched}</span></div>`;
+    const spark = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    spark.setAttribute("class", "mini-spark");
+    spark.setAttribute("viewBox", "0 0 120 28");
+    spark.setAttribute("aria-hidden", "true");
+    renderSpark(spark, c.spark || []);
+    li.appendChild(spark);
+    const open = () => {
+      selectClaim(c.id);
+      focusStageOnNarrow();
+    };
+    li.onclick = open;
+    li.onkeydown = (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        open();
+      }
+    };
     ul.appendChild(li);
   });
 }
@@ -199,9 +263,20 @@ async function selectClaim(id, sha) {
   const conf = state?.confidence ?? 0;
   $("conf-value").textContent = `${Number(conf).toFixed(1)}%`;
   $("conf-fill").style.width = `${conf}%`;
-  $("watching-toggle").checked = Boolean(data.claim.watching);
-  $("watching-chip").textContent = data.claim.watching ? "watching" : "paused";
-  $("watching-chip").classList.toggle("off", !data.claim.watching);
+  const card = $("confidence-card");
+  if (card) {
+    card.classList.remove("low", "mid", "high");
+    card.classList.add(Number(conf) >= 67 ? "high" : Number(conf) <= 33 ? "low" : "mid");
+  }
+  const closed = isClosedClaim(data.claim, state);
+  const verdict = data.claim.outcome_verdict || state?.outcome?.verdict || "";
+  renderClosedState({
+    closed,
+    verdict,
+    outcome: state?.outcome,
+    watching: Boolean(data.claim.watching),
+    browsing,
+  });
   $("dirty-chip").classList.toggle("hidden", browsing || !data.dirty);
   const interval = String(data.claim.watch_interval_seconds || 300);
   if ([...$("watch-interval").options].some((opt) => opt.value === interval)) {
@@ -245,6 +320,95 @@ async function selectClaim(id, sha) {
   await refreshList();
 }
 
+function isClosedClaim(claim, state) {
+  if (claim && (claim.closed === true || claim.closed === 1 || claim.closed === "true")) return true;
+  const outcome = state && state.outcome;
+  if (outcome && typeof outcome === "object" && outcome.verdict) return true;
+  return false;
+}
+
+function renderClosedState({ closed, verdict, outcome, watching, browsing }) {
+  const view = $("claim-view");
+  if (view) view.classList.toggle("is-closed", Boolean(closed));
+  const label = $("conf-label");
+  if (label) label.textContent = closed ? "final" : "confidence";
+  const watchingChip = $("watching-chip");
+  const closedChip = $("closed-chip");
+  const closedText = `closed · ${verdict || "settled"}`;
+  if (closed) {
+    if (closedChip) {
+      closedChip.className = `chip closed ${escapeAttr(verdict)}`;
+      closedChip.textContent = closedText;
+      if (watchingChip) watchingChip.classList.add("hidden");
+    } else if (watchingChip) {
+      watchingChip.className = `chip closed ${escapeAttr(verdict)}`;
+      watchingChip.textContent = closedText;
+      watchingChip.classList.remove("hidden");
+    }
+  } else {
+    if (closedChip) {
+      closedChip.className = "chip closed hidden";
+      closedChip.textContent = "closed";
+    }
+    if (watchingChip) {
+      watchingChip.classList.remove("hidden");
+      watchingChip.className = watching ? "chip" : "chip off";
+      watchingChip.textContent = watching ? "watching" : "paused";
+    }
+  }
+  const watchBtn = $("watch-btn");
+  if (watchBtn) watchBtn.disabled = closed || browsing;
+  const toggle = $("watching-toggle");
+  if (toggle) {
+    toggle.checked = Boolean(watching);
+    toggle.disabled = closed || browsing;
+  }
+  const interval = $("watch-interval");
+  if (interval) interval.disabled = closed || browsing;
+  renderOutcome(outcome, closed);
+}
+
+function outcomeSummaryText(summary, sourceUrl) {
+  let text = String(summary || "").trim();
+  if (sourceUrl) text = text.split(sourceUrl).join(" ");
+  text = text.replace(/https?:\/\/\S+/g, " ");
+  text = text.replace(/Primary source:\s*/gi, " ");
+  text = text.replace(/\s+/g, " ").replace(/\s+([.,;:])/g, "$1").trim();
+  return text || "This claim is closed.";
+}
+
+function renderOutcome(outcome, closed) {
+  const banner = $("outcome-banner");
+  const source = $("outcome-source");
+  if (!banner) return;
+  if (!closed && !outcome) {
+    banner.className = "outcome-banner hidden";
+    if (source) source.classList.add("hidden");
+    return;
+  }
+  const verdict = (outcome && outcome.verdict) || "";
+  banner.className = `outcome-banner ${escapeAttr(verdict)}`;
+  const verdictEl = $("outcome-verdict");
+  const summaryEl = $("outcome-summary");
+  if (verdictEl) verdictEl.textContent = verdict || "settled";
+  if (summaryEl) {
+    summaryEl.textContent = outcomeSummaryText(
+      outcome && outcome.summary,
+      outcome && outcome.source_url,
+    );
+  }
+  if (!source) return;
+  if (outcome && outcome.source_url) {
+    source.href = outcome.source_url;
+    source.textContent = outcome.source_title || outcome.source_url;
+    source.classList.remove("hidden");
+  } else {
+    source.removeAttribute("href");
+    source.textContent = "";
+    source.classList.add("hidden");
+  }
+}
+
 function collectCitations(state) {
   if (!state) return [];
   const seen = new Set();
@@ -260,10 +424,15 @@ function collectCitations(state) {
 
 function fillList(ul, items, render, countEl) {
   ul.innerHTML = "";
-  if (countEl) countEl.textContent = String(items.length);
+  if (countEl) {
+    countEl.textContent = String(items.length);
+    document.querySelectorAll(`[data-count-for="${countEl.id}"]`).forEach((el) => {
+      el.textContent = String(items.length);
+    });
+  }
   if (!items.length) {
     const li = document.createElement("li");
-    li.className = "status";
+    li.className = "empty-item";
     li.textContent = "none yet";
     ul.appendChild(li);
     return;
@@ -287,11 +456,7 @@ function renderLog(log, activeSha) {
       const cls = d > 0 ? "up" : d < 0 ? "down" : "";
       arrow = ` <span class="arrow ${cls}">${prev.toFixed(1)}% → ${c.new_confidence.toFixed(1)}%</span>`;
     }
-    const glyph = idx === chronological.length - 1 ? "*" : "|";
-    const connector = idx === chronological.length - 1 ? "" : "\n|";
-    li.innerHTML = `<div class="git-node">
-      <span class="git-graph">${glyph}${connector}</span>
-      <div>
+    li.innerHTML = `<div>
         <span class="sha">${c.id.slice(0, 12)}${c.id === log[0]?.id ? " (HEAD)" : ""}</span>
         <span class="msg">${escapeHtml(c.message)}${arrow}</span>
         <span class="why">${escapeHtml((c.reason || "").slice(0, 220))}${(c.reason || "").length > 220 ? "…" : ""}</span>
@@ -300,8 +465,7 @@ function renderLog(log, activeSha) {
           <button type="button" class="ghost browse-commit">browse from this commit</button>
           <button type="button" class="ghost diff-commit">diff</button>
         </div>
-      </div>
-    </div>`;
+      </div>`;
     li.querySelector(".browse-commit").onclick = (ev) => {
       ev.stopPropagation();
       selectClaim(currentId, c.id);
@@ -351,15 +515,48 @@ function formatBlameHtml(blame) {
 
 function showDetail(title, html) {
   $("detail").classList.remove("hidden");
+  $("inspector-backdrop").classList.remove("hidden");
   $("detail-title").textContent = title;
   $("detail-body").innerHTML = html;
+  const close = $("detail-close");
+  if (close) close.focus();
+}
+
+function hideDetail() {
+  $("detail").classList.add("hidden");
+  $("inspector-backdrop").classList.add("hidden");
+}
+
+function typingTarget(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT" || el.isContentEditable;
+}
+
+function focusStageOnNarrow() {
+  if (window.innerWidth > 1100) return;
+  const app = $("app");
+  app.classList.remove("show-rail", "show-log");
+  document.querySelectorAll(".pane-switch button").forEach((btn) => {
+    btn.classList.toggle("on", btn.id === "show-stage");
+  });
+}
+
+async function moveClaim(delta) {
+  const rows = visibleClaims();
+  if (!rows.length) return;
+  let idx = rows.findIndex((c) => c.id === currentId);
+  if (idx < 0) idx = delta > 0 ? -1 : 0;
+  const next = rows[(idx + delta + rows.length) % rows.length];
+  await selectClaim(next.id);
+  document.querySelector(`#claim-list li[data-id="${CSS.escape(next.id)}"]`)?.scrollIntoView({ block: "nearest" });
 }
 
 function restorePaneSizes() {
-  const rail = Number(localStorage.getItem("rd-rail-w") || 280);
-  const log = Number(localStorage.getItem("rd-log-w") || 340);
-  document.documentElement.style.setProperty("--rail-w", `${Math.max(200, rail)}px`);
-  document.documentElement.style.setProperty("--log-w", `${Math.max(240, log)}px`);
+  const rail = Number(localStorage.getItem("rd-rail-w") || 300);
+  const log = Number(localStorage.getItem("rd-log-w") || 360);
+  document.documentElement.style.setProperty("--rail-w", `${Math.max(220, rail)}px`);
+  document.documentElement.style.setProperty("--log-w", `${Math.max(260, log)}px`);
 }
 
 function enableResize() {
@@ -369,16 +566,16 @@ function enableResize() {
       gutter.classList.add("dragging");
       const side = gutter.dataset.side;
       const startX = ev.clientX;
-      const startRail = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--rail-w")) || 280;
-      const startLog = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--log-w")) || 340;
+      const startRail = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--rail-w")) || 300;
+      const startLog = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--log-w")) || 360;
       const onMove = (move) => {
         const dx = move.clientX - startX;
         if (side === "rail") {
-          const next = Math.min(480, Math.max(200, startRail + dx));
+          const next = Math.min(480, Math.max(220, startRail + dx));
           document.documentElement.style.setProperty("--rail-w", `${next}px`);
           localStorage.setItem("rd-rail-w", String(next));
         } else {
-          const next = Math.min(560, Math.max(240, startLog - dx));
+          const next = Math.min(560, Math.max(260, startLog - dx));
           document.documentElement.style.setProperty("--log-w", `${next}px`);
           localStorage.setItem("rd-log-w", String(next));
         }
@@ -418,6 +615,11 @@ $("open-form").addEventListener("submit", async (e) => {
 
 $("watch-btn").onclick = async () => {
   if (!currentId) return;
+  const current = claimsCache.find((c) => c.id === currentId);
+  if (current?.closed) {
+    toast("Claim already closed.");
+    return;
+  }
   if (watchingClaims.has(currentId)) {
     toast("Already watching this claim — you can keep browsing.");
     return;
@@ -427,7 +629,7 @@ $("watch-btn").onclick = async () => {
   const btn = $("watch-btn");
   watchingClaims.add(watchingId);
   setBusy(btn, true);
-  setWatchStatus("claim.watch() running in the background. The rest of the UI stays usable.");
+  setWatchStatus("claim.watch() is searching. The rest of the workspace stays usable.");
   try {
     const result = await api(`/api/claims/${watchingId}/watch`, { method: "POST" });
     if (result.in_progress) {
@@ -437,8 +639,12 @@ $("watch-btn").onclick = async () => {
     if (currentId === watchingId) {
       await selectClaim(watchingId, browseAtStart);
     }
-    if (result.changed) {
-      showDetail("watch diff", formatDiffHtml(result.diff));
+    if (result.changed && result.diff) {
+      showDetail(result.closed ? "claim closed" : "watch diff", formatDiffHtml(result.diff));
+    }
+    if (result.closed) {
+      toast(result.detail || "Claim closed with a final outcome.");
+    } else if (result.changed) {
       toast(result.detail || "Belief updated.");
     } else {
       toast(result.detail || "No meaningful change — dropped.");
@@ -550,15 +756,62 @@ $("service-btn").onclick = async () => {
 $("copy-id").onclick = async () => {
   if (!currentId) return;
   await navigator.clipboard.writeText(currentId);
+  const btn = $("copy-id");
+  btn.textContent = "copied";
   toast("Copied " + currentId);
+  setTimeout(() => { btn.textContent = "copy"; }, 1200);
 };
 
 $("browse-head").onclick = () => {
   if (currentId) selectClaim(currentId);
 };
 
-$("detail-close").onclick = () => $("detail").classList.add("hidden");
+$("detail-close").onclick = () => hideDetail();
+$("inspector-backdrop").onclick = () => hideDetail();
 $("claim-filter").addEventListener("input", renderClaimList);
+document.querySelectorAll("#status-filter [data-status]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    listStatus = btn.dataset.status || "all";
+    localStorage.setItem("rd-list-status", listStatus);
+    renderClaimList();
+  });
+});
+
+function showPane(which) {
+  const app = $("app");
+  app.classList.toggle("show-rail", which === "claims");
+  app.classList.toggle("show-log", which === "history");
+  document.querySelectorAll(".pane-switch button").forEach((btn) => {
+    btn.classList.toggle("on", btn.id === `show-${which === "claims" ? "claims" : which === "history" ? "log" : "stage"}`);
+  });
+}
+$("show-claims").onclick = () => showPane("claims");
+$("show-stage").onclick = () => showPane("belief");
+$("show-log").onclick = () => showPane("history");
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") {
+    if (!$("detail").classList.contains("hidden")) {
+      hideDetail();
+      ev.preventDefault();
+    }
+    return;
+  }
+  if (typingTarget(ev.target)) {
+    return;
+  }
+  if (ev.key === "/") {
+    ev.preventDefault();
+    if (window.innerWidth <= 1100) showPane("claims");
+    $("claim-filter").focus();
+    return;
+  }
+  if (ev.key === "j") { ev.preventDefault(); moveClaim(1); return; }
+  if (ev.key === "k") { ev.preventDefault(); moveClaim(-1); return; }
+  if (ev.key === "w" && currentId) { ev.preventDefault(); $("watch-btn").click(); return; }
+  if (ev.key === "d" && currentId) { ev.preventDefault(); $("diff-btn").click(); return; }
+  if (ev.key === "b" && currentId) { ev.preventDefault(); $("blame-btn").click(); return; }
+});
 
 window.addEventListener("hashchange", () => {
   const { id, sha } = parseRoute();

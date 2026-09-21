@@ -29,6 +29,15 @@ def blame_history(claim_id: str, history: list[Commit]) -> BlameReport:
             note("confidence", commit, state.confidence)
         if previous is None or previous.summary != state.summary:
             note("summary", commit, state.summary)
+        if previous is None or (
+            (previous.outcome is None) != (state.outcome is None)
+            or (
+                previous.outcome
+                and state.outcome
+                and previous.outcome.model_dump(mode="json") != state.outcome.model_dump(mode="json")
+            )
+        ):
+            note("outcome", commit, state.outcome.model_dump(mode="json") if state.outcome else None)
 
         prev_for = {item.id: item for item in previous.evidence_for} if previous else {}
         prev_against = {item.id: item for item in previous.evidence_against} if previous else {}

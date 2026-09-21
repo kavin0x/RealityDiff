@@ -24,4 +24,7 @@ def test_payload_keeps_system_prefix_for_cache():
     assert payload["prompt_cache_key"] == "realitydiff-init-v2"
     assert payload["input"][0]["role"] == "system"
     assert payload["input"][1]["role"] == "user"
-    assert payload["tools"] == [{"type": "web_search"}, {"type": "x_search"}]
+    assert payload["tools"][0]["name"] == "close_claim"
+    assert payload["tools"][0]["type"] == "function"
+    assert {"type": "web_search"} in payload["tools"]
+    assert {"type": "x_search"} in payload["tools"]

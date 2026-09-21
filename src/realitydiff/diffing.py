@@ -108,6 +108,18 @@ def diff_states(
             )
         )
 
+    if (before.outcome is None) != (after.outcome is None) or (
+        before.outcome and after.outcome and before.outcome.model_dump(mode="json") != after.outcome.model_dump(mode="json")
+    ):
+        changes.append(
+            FieldChange(
+                path="outcome",
+                before=_dump(before.outcome) if before.outcome else None,
+                after=_dump(after.outcome) if after.outcome else None,
+                kind="added" if after.outcome and not before.outcome else ("removed" if before.outcome and not after.outcome else "changed"),
+            )
+        )
+
     for bucket in ("evidence_for", "evidence_against"):
         left_map = _index_evidence(getattr(before, bucket))
         right_map = _index_evidence(getattr(after, bucket))

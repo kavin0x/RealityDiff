@@ -24,6 +24,7 @@ def compact_belief(state: ClaimState) -> dict[str, Any]:
         ],
         "predictions": [_compact_prediction(item) for item in state.predictions],
         "citations": [{"url": c.url, "title": c.title} for c in state.citations[:24]],
+        "outcome": state.outcome.model_dump(mode="json") if state.outcome else None,
     }
 
 
@@ -39,6 +40,10 @@ def is_material_change(before: ClaimState, after: ClaimState) -> bool:
     if {u.question.strip().lower() for u in before.unknowns} != {u.question.strip().lower() for u in after.unknowns}:
         return True
     if _prediction_signature(before.predictions) != _prediction_signature(after.predictions):
+        return True
+    if (before.outcome is None) != (after.outcome is None):
+        return True
+    if before.outcome and after.outcome and before.outcome.model_dump(mode="json") != after.outcome.model_dump(mode="json"):
         return True
     return False
 

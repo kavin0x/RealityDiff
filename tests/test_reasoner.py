@@ -8,13 +8,16 @@ from realitydiff.store import BeliefStore
 
 
 class ScriptedModel:
-    def __init__(self, payloads: list[str]) -> None:
+    def __init__(self, payloads: list[Any]) -> None:
         self.payloads = list(payloads)
         self.calls: list[dict[str, Any]] = []
 
     def complete(self, prompt: str, *, search: bool = False, **kwargs) -> dict[str, Any]:
         self.calls.append({"prompt": prompt, "search": search, **kwargs})
-        return {"text": self.payloads.pop(0), "citations": [], "model": "scripted"}
+        item = self.payloads.pop(0)
+        if isinstance(item, dict) and "text" in item:
+            return {"citations": [], "model": "scripted", **item}
+        return {"text": item, "citations": [], "model": "scripted"}
 
 
 INIT = """```json

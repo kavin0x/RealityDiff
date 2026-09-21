@@ -19,6 +19,51 @@ DEFAULT_MODELS = (
 JSON_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 TRAILING_COMMA = re.compile(r",(\s*[}\]])")
 COMPACT_AFTER_TOKENS = 6_000
+MAX_TOOL_ROUNDS = 3
+
+CLOSE_CLAIM_TOOL: dict[str, Any] = {
+    "type": "function",
+    "name": "close_claim",
+    "description": (
+        "Close this living claim because the real-world outcome is now known. "
+        "Call only when the claim itself is resolved by primary evidence: official "
+        "confirmation, a shipping product, an election or court result, or an equivalent "
+        "recorded fact. Do not call for rumors, high confidence, stale due dates, or "
+        "ordinary watch updates. After calling, still return the final belief JSON."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "verdict": {
+                "type": "string",
+                "enum": ["confirmed", "falsified", "settled"],
+                "description": (
+                    "confirmed = the claim happened / is true; falsified = it did not / is false; "
+                    "settled = the outcome is known but is not a binary yes/no"
+                ),
+            },
+            "outcome": {
+                "type": "string",
+                "description": "One paragraph: what happened, with the strongest URLs.",
+            },
+            "confidence": {
+                "type": "number",
+                "description": "Final confidence 0-100 after the outcome.",
+            },
+            "source_url": {
+                "type": "string",
+                "description": "Primary https URL proving the outcome.",
+            },
+            "source_title": {
+                "type": "string",
+                "description": "Title of the primary source.",
+            },
+        },
+        "required": ["verdict", "outcome"],
+    },
+}
+
+SEARCH_TOOLS: list[dict[str, Any]] = [{"type": "web_search"}, {"type": "x_search"}]
 
 
 class XAIError(RuntimeError):
@@ -112,8 +157,14 @@ class XAIClient:
                             last_error = XAIError(str(body.get("incomplete_details") or body))
                             time.sleep(2**retry)
                             continue
-                        text = extract_output_text(body)
-                        if not text.strip():
+                        text, close_claim, body = self._resolve_tools(
+                            model=model,
+                            sticky=sticky,
+                            search=search,
+                            store=plan["store"],
+                            body=body,
+                        )
+                        if not text.strip() and not close_claim:
                             last_error = XAIError(f"{model} returned empty output")
                             time.sleep(2**retry)
                             continue
@@ -126,6 +177,7 @@ class XAIClient:
                             "cached_tokens": _cached_tokens(body),
                             "input_tokens": _input_tokens(body),
                             "compaction": None,
+                            "close_claim": close_claim,
                             "raw": body,
                         }
                         if result["input_tokens"] >= COMPACT_AFTER_TOKENS:
@@ -135,6 +187,64 @@ class XAIClient:
                         last_error = exc
                         time.sleep(2**retry)
         raise XAIError(f"xAI request failed: {last_error}")
+
+    def _resolve_tools(
+        self,
+        *,
+        model: str,
+        sticky: str,
+        search: bool,
+        store: bool,
+        body: dict[str, Any],
+    ) -> tuple[str, dict[str, Any] | None, dict[str, Any]]:
+        close_claim: dict[str, Any] | None = None
+        text = extract_output_text(body)
+        for _ in range(MAX_TOOL_ROUNDS):
+            calls = extract_function_calls(body)
+            if not calls:
+                break
+            outputs: list[dict[str, Any]] = []
+            for call in calls:
+                executed = execute_agent_tool(call["name"], call["arguments"])
+                if call["name"] == "close_claim" and executed.get("ok"):
+                    close_claim = executed
+                outputs.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": call["call_id"],
+                        "output": json.dumps(executed),
+                    }
+                )
+            if text.strip() or not body.get("id"):
+                break
+            follow = {
+                "model": model,
+                "store": store,
+                "input": outputs,
+                "prompt_cache_key": sticky,
+                "previous_response_id": body.get("id"),
+                "tools": agent_tools(search=search),
+            }
+            try:
+                response = httpx.post(
+                    f"{self.base_url}/responses",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                        "x-grok-conv-id": sticky,
+                    },
+                    json=follow,
+                    timeout=self.timeout,
+                )
+            except httpx.HTTPError:
+                break
+            if response.status_code >= 400:
+                break
+            body = response.json()
+            if body.get("error") or body.get("status") == "failed":
+                break
+            text = extract_output_text(body)
+        return text, close_claim, body
 
     def _compact(self, model: str, messages: list[dict[str, Any]], conv_id: str) -> dict[str, Any] | None:
         try:
@@ -219,8 +329,59 @@ def _build_payload(
     if previous_response_id:
         payload["previous_response_id"] = previous_response_id
     if search:
-        payload["tools"] = [{"type": "web_search"}, {"type": "x_search"}]
+        payload["tools"] = agent_tools(search=True)
     return payload
+
+
+def agent_tools(*, search: bool = False) -> list[dict[str, Any]]:
+    tools: list[dict[str, Any]] = [CLOSE_CLAIM_TOOL]
+    if search:
+        tools.extend(SEARCH_TOOLS)
+    return tools
+
+
+def execute_agent_tool(name: str, arguments: Any) -> dict[str, Any]:
+    if name == "close_claim":
+        return parse_close_claim(arguments)
+    return {"ok": False, "error": f"unknown tool {name}"}
+
+
+def parse_close_claim(arguments: Any) -> dict[str, Any]:
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments) if arguments.strip() else {}
+        except json.JSONDecodeError:
+            return {"ok": False, "error": "arguments are not JSON"}
+    if not isinstance(arguments, dict):
+        return {"ok": False, "error": "arguments must be an object"}
+    verdict = str(arguments.get("verdict") or "").strip().lower()
+    if verdict not in {"confirmed", "falsified", "settled"}:
+        return {"ok": False, "error": "verdict must be confirmed, falsified, or settled"}
+    outcome = str(arguments.get("outcome") or "").strip()
+    if len(outcome) < 8:
+        return {"ok": False, "error": "outcome must describe what happened"}
+    source_url = str(arguments.get("source_url") or "").strip() or None
+    if source_url and not source_url.startswith(("http://", "https://")):
+        source_url = None
+    confidence = arguments.get("confidence")
+    if isinstance(confidence, bool) or confidence == "":
+        confidence = None
+    elif isinstance(confidence, (int, float)):
+        confidence = max(0.0, min(100.0, float(confidence)))
+    else:
+        try:
+            confidence = max(0.0, min(100.0, float(str(confidence).replace("%", ""))))
+        except (TypeError, ValueError):
+            confidence = None
+    return {
+        "ok": True,
+        "closed": True,
+        "verdict": verdict,
+        "outcome": outcome,
+        "confidence": confidence,
+        "source_url": source_url,
+        "source_title": str(arguments.get("source_title") or "").strip() or None,
+    }
 
 
 def _cached_tokens(body: dict[str, Any]) -> int:
@@ -247,6 +408,21 @@ def extract_output_text(body: dict[str, Any]) -> str:
     if body.get("output_text"):
         return str(body["output_text"])
     return ""
+
+
+def extract_function_calls(body: dict[str, Any]) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    for item in body.get("output") or []:
+        if item.get("type") != "function_call":
+            continue
+        found.append(
+            {
+                "name": str(item.get("name") or ""),
+                "call_id": str(item.get("call_id") or item.get("id") or ""),
+                "arguments": item.get("arguments") or "{}",
+            }
+        )
+    return found
 
 
 def extract_citations(body: dict[str, Any]) -> list[dict[str, str]]:

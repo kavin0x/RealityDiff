@@ -94,7 +94,17 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "open":
         living, commit = engine.open_claim(args.statement)
-        _print({"claim_id": living.id, "commit": commit.id, "confidence": commit.new_confidence, "reason": commit.reason})
+        record = living.refresh()
+        _print(
+            {
+                "claim_id": living.id,
+                "commit": commit.id,
+                "confidence": commit.new_confidence,
+                "reason": commit.reason,
+                "closed": record.closed,
+                "outcome_verdict": record.outcome_verdict,
+            }
+        )
         return 0
     if args.cmd == "ls":
         _print([record.model_dump(mode="json") for record in engine.store.list_claims()])

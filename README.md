@@ -1,6 +1,6 @@
 # Reality Diff
 
-[![version](https://img.shields.io/badge/version-0.3.0-b6e388?style=flat-square)](https://github.com/kavin0x/RealityDiff)
+[![version](https://img.shields.io/badge/version-0.4.0-b6e388?style=flat-square)](https://github.com/kavin0x/RealityDiff)
 [![python](https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![uv](https://img.shields.io/badge/packaging-uv-DE5FE9?style=flat-square)](https://docs.astral.sh/uv/)
 [![xAI](https://img.shields.io/badge/AI-xAI%20Grok%204.3-000000?style=flat-square)](https://docs.x.ai/)
@@ -15,7 +15,7 @@ Give it a claim:
 
 > Apple is going to replace Siri with an LLM.
 
-The system creates a living claim object — evidence for, evidence against, citations, unknowns, predictions, confidence — then watches the internet. When **meaningful** new evidence appears, confidence moves and the reason is committed. Cosmetic rewrites are dropped.
+The system creates a living claim object — evidence for, evidence against, citations, unknowns, predictions, confidence — then watches the internet. When **meaningful** new evidence appears, confidence moves and the reason is committed. Cosmetic rewrites are dropped. When the real-world outcome is in, Grok calls a `close_claim` tool: the claim is closed with a final verdict (`confirmed` / `falsified` / `settled`), watching stops, and that close is committed.
 
 ```python
 claim.commit()
@@ -25,7 +25,7 @@ claim.revert()
 claim.watch()
 ```
 
-Reasoning and live web/X search use the xAI Responses API (`web_search`, `x_search`). Default model is `grok-4.3` (1M context). Stable system prompts are sent first so **cached inputs** can bill cheaper; if a cached / `previous_response_id` / compacted turn fails, the client falls back to a full uncached request. Large conversations are compacted via `/v1/responses/compact`.
+Reasoning and live web/X search use the xAI Responses API (`web_search`, `x_search`, plus the client-side `close_claim` tool). Default model is `grok-4.3` (1M context). Stable system prompts are sent first so **cached inputs** can bill cheaper; if a cached / `previous_response_id` / compacted turn fails, the client falls back to a full uncached request. Large conversations are compacted via `/v1/responses/compact`.
 
 ## Run
 
@@ -69,7 +69,7 @@ The HTTP surface is REST. Nested claim trees, Git-style mutations, and a GraphQL
 | GET | `/api/claims/{id}` | HEAD + working tree |
 | GET | `/api/claims/{id}/at/{sha}` | browse the belief as of that commit |
 | GET | `/api/claims/{id}/tree` | git parent chain |
-| POST | `/api/claims/{id}/watch` | search again; commit only if evidence moved |
+| POST | `/api/claims/{id}/watch` | search again; commit only if evidence moved; may close the claim |
 | GET | `/api/claims/{id}/diff` | `claim.diff(a, b)` |
 | GET | `/api/claims/{id}/blame` | `claim.blame()` |
 | POST | `/api/claims/{id}/commit` | `claim.commit()` |

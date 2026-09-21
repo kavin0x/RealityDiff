@@ -5,13 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Reality Diff — Git for beliefs</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=0.4.5" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
 </head>
 <body>
   <div class="grain" aria-hidden="true"></div>
-  <div class="app">
+  <div class="app" id="app">
+    <div class="pane-switch" role="tablist" aria-label="Workspace panes">
+      <button type="button" id="show-claims" role="tab">claims</button>
+      <button type="button" id="show-stage" role="tab" class="on">belief</button>
+      <button type="button" id="show-log" role="tab">history</button>
+    </div>
     <aside class="rail" id="rail">
       <header class="brand">
         <div class="mark">Δ</div>
@@ -27,10 +32,16 @@
       </form>
       <label class="filter-label" for="claim-filter">Filter heads</label>
       <input id="claim-filter" type="search" placeholder="search claims" />
+      <div class="seg" id="status-filter" role="tablist" aria-label="Claim status">
+        <button type="button" data-status="all" class="on" role="tab">all <span class="seg-n">0</span></button>
+        <button type="button" data-status="open" role="tab">open <span class="seg-n">0</span></button>
+        <button type="button" data-status="closed" role="tab">closed <span class="seg-n">0</span></button>
+      </div>
       <section class="claim-list-wrap">
-        <h2>HEADS</h2>
+        <h2>HEADS <span class="count" id="heads-count">0</span></h2>
         <ul id="claim-list"></ul>
       </section>
+      <p class="keys" id="keys"><kbd>/</kbd> filter · <kbd>j</kbd><kbd>k</kbd> claims · <kbd>w</kbd> watch · <kbd>d</kbd> diff · <kbd>b</kbd> blame · <kbd>esc</kbd> close</p>
     </aside>
     <div class="gutter" data-side="rail" title="Drag to resize"></div>
 
@@ -57,55 +68,73 @@
               <span class="kicker" id="claim-id"></span>
               <button type="button" class="ghost" id="copy-id" title="Copy claim id">copy</button>
               <span id="watching-chip" class="chip">watching</span>
+              <span id="closed-chip" class="chip hidden">closed</span>
               <span id="dirty-chip" class="chip hidden">dirty</span>
             </div>
             <h2 class="serif" id="claim-title"></h2>
             <p class="refined" id="claim-refined"></p>
           </div>
-          <div class="confidence-card">
-            <div class="conf-label">confidence</div>
+          <div class="confidence-card" id="confidence-card">
+            <div class="conf-label" id="conf-label">confidence</div>
             <div class="conf-value" id="conf-value">—</div>
             <div class="conf-delta" id="conf-delta"></div>
             <div class="conf-bar"><span id="conf-fill"></span></div>
             <svg id="spark" class="spark" viewBox="0 0 120 28" preserveAspectRatio="none"></svg>
           </div>
         </header>
+        <div id="outcome-banner" class="outcome-banner hidden">
+          <span class="kicker">final outcome</span>
+          <strong id="outcome-verdict"></strong>
+          <p id="outcome-summary"></p>
+          <a id="outcome-source" class="src hidden" target="_blank" rel="noreferrer"></a>
+        </div>
         <p class="reason" id="claim-reason"></p>
+        <nav id="stat-strip" class="stat-strip" aria-label="Belief sections">
+          <a href="#sec-for">for <span data-count-for="count-for">0</span></a>
+          <a href="#sec-against">against <span data-count-for="count-against">0</span></a>
+          <a href="#sec-unknowns">unknowns <span data-count-for="count-unknowns">0</span></a>
+          <a href="#sec-predictions">predictions <span data-count-for="count-predictions">0</span></a>
+          <a href="#sec-citations">citations <span data-count-for="count-citations">0</span></a>
+        </nav>
         <div class="actions">
-          <button id="watch-btn">claim.watch()</button>
-          <button id="diff-btn">claim.diff()</button>
-          <button id="blame-btn">claim.blame()</button>
-          <button id="revert-btn" class="danger">claim.revert()</button>
-          <label class="watch-toggle">
-            <input type="checkbox" id="watching-toggle" />
-            live watch
-          </label>
-          <label class="watch-toggle" for="watch-interval">every
-            <select id="watch-interval">
-              <option value="60">1m</option>
-              <option value="300" selected>5m</option>
-              <option value="900">15m</option>
-              <option value="3600">1h</option>
-              <option value="21600">6h</option>
-              <option value="86400">1d</option>
-            </select>
-          </label>
+          <div class="action-row">
+            <button id="watch-btn">claim.watch()</button>
+            <button id="diff-btn">claim.diff()</button>
+            <button id="blame-btn">claim.blame()</button>
+            <button id="revert-btn" class="danger">claim.revert()</button>
+          </div>
+          <div class="action-row" id="watch-controls">
+            <label class="watch-toggle">
+              <input type="checkbox" id="watching-toggle" />
+              live watch
+            </label>
+            <label class="watch-toggle" for="watch-interval">every
+              <select id="watch-interval">
+                <option value="60">1m</option>
+                <option value="300" selected>5m</option>
+                <option value="900">15m</option>
+                <option value="3600">1h</option>
+                <option value="21600">6h</option>
+                <option value="86400">1d</option>
+              </select>
+            </label>
+          </div>
           <button type="button" id="service-btn" class="ghost">install timer service</button>
         </div>
         <div class="tree-grid">
-          <article>
+          <article id="sec-for">
             <h3>Evidence FOR <span class="count" id="count-for">0</span></h3>
             <ul id="ev-for" class="stack"></ul>
           </article>
-          <article>
+          <article id="sec-against">
             <h3>Evidence AGAINST <span class="count" id="count-against">0</span></h3>
             <ul id="ev-against" class="stack"></ul>
           </article>
-          <article>
+          <article id="sec-unknowns">
             <h3>Unknowns <span class="count" id="count-unknowns">0</span></h3>
             <ul id="unknowns" class="stack"></ul>
           </article>
-          <article>
+          <article id="sec-predictions">
             <h3>Predictions <span class="count" id="count-predictions">0</span></h3>
             <ul id="predictions" class="stack"></ul>
           </article>
@@ -114,7 +143,7 @@
           <h3>Belief</h3>
           <p class="summary" id="summary"></p>
         </section>
-        <section class="summary-card">
+        <section class="summary-card" id="sec-citations">
           <h3>Citations <span class="count" id="count-citations">0</span></h3>
           <ul id="citations" class="stack"></ul>
         </section>
@@ -128,15 +157,16 @@
         <span id="log-meta"></span>
       </header>
       <ol id="commit-log"></ol>
-      <section id="detail" class="detail hidden">
-        <div class="detail-head">
-          <h2 id="detail-title">diff</h2>
-          <button type="button" class="ghost" id="detail-close">close</button>
-        </div>
-        <div id="detail-body" class="detail-body"></div>
-      </section>
     </aside>
   </div>
+  <div id="inspector-backdrop" class="inspector-backdrop hidden"></div>
+  <section id="detail" class="detail hidden" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+    <div class="detail-head">
+      <h2 id="detail-title">diff</h2>
+      <button type="button" class="ghost" id="detail-close">close</button>
+    </div>
+    <div id="detail-body" class="detail-body"></div>
+  </section>
   <div id="overlay" class="overlay hidden" role="status">
     <div class="overlay-card">
       <div class="spinner" aria-hidden="true"></div>
@@ -145,6 +175,6 @@
     </div>
   </div>
   <div id="toast" class="toast hidden"></div>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=0.4.5"></script>
 </body>
 </html>

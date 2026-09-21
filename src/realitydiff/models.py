@@ -71,6 +71,14 @@ class Citation(BaseModel):
         return cls(url=url.strip(), title=(title or "").strip())
 
 
+class ClaimOutcome(BaseModel):
+    verdict: Literal["confirmed", "falsified", "settled"]
+    summary: str
+    source_url: str | None = None
+    source_title: str | None = None
+    closed_at: datetime = Field(default_factory=utcnow)
+
+
 class Prediction(BaseModel):
     id: str
     statement: str
@@ -106,6 +114,7 @@ class ClaimState(BaseModel):
     predictions: list[Prediction] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
     summary: str = ""
+    outcome: ClaimOutcome | None = None
 
     @field_validator("confidence")
     @classmethod
@@ -187,6 +196,9 @@ class ClaimRecord(BaseModel):
     last_watched_at: datetime | None = None
     last_response_id: str | None = None
     compaction_json: str | None = None
+    closed: bool = False
+    closed_at: datetime | None = None
+    outcome_verdict: Literal["confirmed", "falsified", "settled"] | None = None
 
 
 class FieldChange(BaseModel):
@@ -234,3 +246,4 @@ class WatchResult(BaseModel):
     detail: str = ""
     in_progress: bool = False
     cached_tokens: int = 0
+    closed: bool = False

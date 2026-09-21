@@ -56,6 +56,7 @@ class RealityDiff:
                 response_id=meta.get("response_id"),
                 compaction=meta.get("compaction"),
             )
+            self._maybe_close(record.id, state, meta)
             return self.claim(record.id), commit
         except Exception:
             self.store.delete_claim(record.id)
@@ -72,6 +73,13 @@ class RealityDiff:
             )
         try:
             living = self.claim(claim_id)
+            if living.record.closed:
+                return WatchResult(
+                    claim_id=claim_id,
+                    changed=False,
+                    closed=True,
+                    detail="Claim already closed.",
+                )
             head = living.head
             if head is None:
                 raise RuntimeError("Claim has no commits yet")
@@ -95,19 +103,26 @@ class RealityDiff:
                 compaction=meta.get("compaction") or compaction,
             )
             cached = int(meta.get("cached_tokens") or 0)
+            closed = bool(new_state.outcome) or bool(
+                isinstance(meta.get("close_claim"), dict) and meta.get("close_claim", {}).get("ok")
+            )
             if not changed:
+                if closed:
+                    self._maybe_close(claim_id, new_state, meta)
                 return WatchResult(
                     claim_id=claim_id,
                     changed=False,
                     detail=reason,
                     cached_tokens=cached,
+                    closed=bool(self.claim(claim_id).record.closed),
                 )
             self.store.set_working_state(claim_id, new_state)
             commit = living.commit(
-                "Watch update",
+                "Claim closed" if new_state.outcome else "Watch update",
                 author=author,
                 reason=reason,
             )
+            self._maybe_close(claim_id, commit.state, meta)
             diff = diff_states(
                 head.state,
                 commit.state,
@@ -122,6 +137,7 @@ class RealityDiff:
                 diff=diff,
                 detail=reason,
                 cached_tokens=cached,
+                closed=bool(commit.state.outcome),
             )
         finally:
             lock.release()
@@ -130,7 +146,7 @@ class RealityDiff:
         results: list[WatchResult] = []
         now = time.time()
         for record in self.store.list_claims():
-            if not record.watching or not record.head:
+            if record.closed or not record.watching or not record.head:
                 continue
             last = record.last_watched_at.timestamp() if record.last_watched_at else 0.0
             if now - last < record.watch_interval_seconds:
@@ -141,6 +157,16 @@ class RealityDiff:
                 log.exception("watch failed for %s", record.id)
                 self.store.mark_watched(record.id)
         return results
+
+    def _maybe_close(self, claim_id: str, state, meta: dict | None = None) -> None:
+        close = (meta or {}).get("close_claim") if isinstance((meta or {}).get("close_claim"), dict) else None
+        outcome = state.outcome
+        if outcome is None and not (close and close.get("ok")):
+            return
+        verdict = outcome.verdict if outcome else close.get("verdict")
+        if verdict not in {"confirmed", "falsified", "settled"}:
+            return
+        self.store.close_claim(claim_id, verdict=verdict, closed_at=outcome.closed_at if outcome else None)
 
     def _lock_for(self, claim_id: str) -> threading.Lock:
         with self._watch_meta:

@@ -219,7 +219,10 @@ def create_app(
     @app.post("/api/claims/{claim_id}/watching")
     def set_watching(claim_id: str, body: WatchConfigBody) -> ClaimRecord:
         _claim(engine, claim_id)
-        engine.store.set_watching(claim_id, body.watching, body.interval_seconds)
+        try:
+            engine.store.set_watching(claim_id, body.watching, body.interval_seconds)
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
         record = engine.store.get_claim(claim_id)
         assert record is not None
         return record
@@ -247,7 +250,7 @@ def create_app(
 
         @app.get("/")
         def index() -> FileResponse:
-            return FileResponse(STATIC / "index.html")
+            return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
 
         @app.get("/favicon.svg")
         def favicon() -> FileResponse:

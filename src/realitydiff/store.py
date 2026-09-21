@@ -5,6 +5,7 @@ import sqlite3
 import threading
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 from realitydiff.hashing import sha1_hex
 from realitydiff.models import ClaimRecord, ClaimState, Commit, utcnow
@@ -21,7 +22,10 @@ CREATE TABLE IF NOT EXISTS claims (
     last_watched_at TEXT,
     working_json TEXT,
     last_response_id TEXT,
-    compaction_json TEXT
+    compaction_json TEXT,
+    closed INTEGER NOT NULL DEFAULT 0,
+    closed_at TEXT,
+    outcome_verdict TEXT
 );
 
 CREATE TABLE IF NOT EXISTS commits (
@@ -69,6 +73,12 @@ class BeliefStore:
             self._conn.execute("ALTER TABLE claims ADD COLUMN last_response_id TEXT")
         if "compaction_json" not in cols:
             self._conn.execute("ALTER TABLE claims ADD COLUMN compaction_json TEXT")
+        if "closed" not in cols:
+            self._conn.execute("ALTER TABLE claims ADD COLUMN closed INTEGER NOT NULL DEFAULT 0")
+        if "closed_at" not in cols:
+            self._conn.execute("ALTER TABLE claims ADD COLUMN closed_at TEXT")
+        if "outcome_verdict" not in cols:
+            self._conn.execute("ALTER TABLE claims ADD COLUMN outcome_verdict TEXT")
 
     def create_claim(self, statement: str, *, claim_id: str | None = None) -> ClaimRecord:
         created = utcnow()
@@ -103,6 +113,9 @@ class BeliefStore:
         return [self._claim_from_row(row) for row in rows]
 
     def set_watching(self, claim_id: str, watching: bool, interval: int | None = None) -> None:
+        claim = self.get_claim(claim_id)
+        if claim and claim.closed and watching:
+            raise RuntimeError("Claim is closed")
         if interval is None:
             self._conn.execute("UPDATE claims SET watching = ? WHERE id = ?", (int(watching), claim_id))
         else:
@@ -110,6 +123,24 @@ class BeliefStore:
                 "UPDATE claims SET watching = ?, watch_interval_seconds = ? WHERE id = ?",
                 (int(watching), interval, claim_id),
             )
+        self._conn.commit()
+
+    def close_claim(
+        self,
+        claim_id: str,
+        *,
+        verdict: Literal["confirmed", "falsified", "settled"],
+        closed_at: datetime | None = None,
+    ) -> None:
+        stamp = (closed_at or utcnow()).isoformat()
+        self._conn.execute(
+            """
+            UPDATE claims
+            SET watching = 0, closed = 1, closed_at = ?, outcome_verdict = ?
+            WHERE id = ?
+            """,
+            (stamp, verdict, claim_id),
+        )
         self._conn.commit()
 
     def mark_watched(self, claim_id: str, when: datetime | None = None) -> None:
@@ -242,6 +273,11 @@ class BeliefStore:
             else None,
             last_response_id=row["last_response_id"] if "last_response_id" in row.keys() else None,
             compaction_json=row["compaction_json"] if "compaction_json" in row.keys() else None,
+            closed=bool(row["closed"]) if "closed" in row.keys() else False,
+            closed_at=datetime.fromisoformat(row["closed_at"])
+            if "closed_at" in row.keys() and row["closed_at"]
+            else None,
+            outcome_verdict=row["outcome_verdict"] if "outcome_verdict" in row.keys() else None,
         )
 
     def _commit_from_row(self, row: sqlite3.Row) -> Commit:

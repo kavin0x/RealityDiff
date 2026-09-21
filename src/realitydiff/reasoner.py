@@ -4,8 +4,8 @@ import json
 from typing import Any
 
 from realitydiff.compress import compact_belief, is_material_change
-from realitydiff.models import Citation, ClaimState, Evidence, Prediction, Unknown, utcnow
-from realitydiff.xai import LanguageModel, parse_json_object
+from realitydiff.models import Citation, ClaimOutcome, ClaimState, Evidence, Prediction, Unknown, utcnow
+from realitydiff.xai import LanguageModel, parse_json_object, XAIError
 
 
 SYSTEM_PROMPT = """You are Reality Diff, a belief-versioning engine. You do not chat.
@@ -13,6 +13,12 @@ You turn claims into living, evidence-weighted belief objects and update them fr
 
 Search the live web and X. Prefer primary sources: company docs, SEC filings, official blogs,
 reputable reporting, patents, job posts.
+
+You have a close_claim tool. Call it only when the claim's real-world outcome is now known
+from primary evidence (official confirmation, shipping product, recorded result, court ruling).
+Do not close on rumors, high confidence, or expired due dates without an actual outcome.
+After close_claim, still return the JSON belief object with changed=true, final confidence,
+and evidence for the outcome.
 
 Citations are mandatory. Every evidence item MUST include a https source_url from search.
 If you cannot cite a fact, put it in unknowns instead of evidence.
@@ -117,6 +123,7 @@ Rules:
 - Direct official documentation that confirms the refined claim can jump more.
 - Direct official contradiction should drop more.
 - Keep prior evidence unless retracted or obsolete; mark obsolescence in notes.
+- If the claim itself has resolved, call close_claim and set changed=true.
 """
 
 
@@ -130,11 +137,17 @@ class Reasoner:
             search=True,
             system=SYSTEM_PROMPT,
             conv_id=conv_id or "realitydiff-init",
-            cache_key="realitydiff-init-v2",
+            cache_key="realitydiff-init-v3",
         )
-        data = parse_json_object(result["text"])
+        data = _payload_from_result(
+            result,
+            required=not bool(isinstance(result.get("close_claim"), dict) and result.get("close_claim", {}).get("ok")),
+        )
+        if not data:
+            data = {"statement": claim.strip(), "confidence": 50, "reason": ""}
         state = self._state_from_payload(data, fallback_statement=claim, citations=result.get("citations") or [])
-        reason = str(data.get("reason") or "Initial internet survey.")
+        state = apply_close_claim(state, result.get("close_claim"))
+        reason = str(data.get("reason") or (state.outcome.summary if state.outcome else "Initial internet survey."))
         return state, reason, result
 
     def update(
@@ -162,27 +175,34 @@ class Reasoner:
             search=True,
             system=SYSTEM_PROMPT,
             conv_id=conv_id,
-            cache_key=conv_id or "realitydiff-watch-v2",
+            cache_key=conv_id or "realitydiff-watch-v3",
             previous_response_id=previous_response_id,
             compaction=compaction,
         )
-        data = parse_json_object(result["text"])
-        changed = bool(data.get("changed"))
+        close = result.get("close_claim") if isinstance(result.get("close_claim"), dict) else None
+        data = _payload_from_result(result, required=not bool(close and close.get("ok")))
+        changed = bool(data.get("changed")) or bool(close and close.get("ok"))
         reason = str(data.get("reason") or "")
         if not changed:
             return current, reason or "No new evidence.", False, result
-        state = self._state_from_payload(
-            data,
-            fallback_statement=current.statement,
-            previous=current,
-            citations=result.get("citations") or [],
-        )
+        if data:
+            state = self._state_from_payload(
+                data,
+                fallback_statement=current.statement,
+                previous=current,
+                citations=result.get("citations") or [],
+            )
+        else:
+            state = current
+        state = apply_close_claim(state, close)
         if state.tree_hash() == current.tree_hash() or not is_material_change(current, state):
             note = reason.strip()
             detail = "No material change."
             if note:
                 detail = f"No material change. {note}"
             return current, detail, False, result
+        if state.outcome and not reason:
+            reason = state.outcome.summary
         return state, reason or "New evidence updated the belief.", True, result
 
     def _state_from_payload(
@@ -213,6 +233,7 @@ class Reasoner:
             unknowns=self._parse_unknowns(data.get("unknowns") or [], prev_unknowns),
             predictions=self._parse_predictions(data.get("predictions") or [], prev_preds),
             citations=cited,
+            outcome=previous.outcome if previous else None,
         )
 
     def _parse_evidence(self, items: list[Any], previous: dict[str, Evidence]) -> list[Evidence]:
@@ -296,6 +317,68 @@ class Reasoner:
             seen.add(prediction.id)
             parsed.append(prediction)
         return parsed[:8]
+
+
+def _payload_from_result(result: dict[str, Any], *, required: bool = True) -> dict[str, Any]:
+    text = str(result.get("text") or "")
+    if not text.strip():
+        if required:
+            return parse_json_object(text)
+        return {}
+    try:
+        return parse_json_object(text)
+    except XAIError:
+        if required:
+            raise
+        return {}
+
+
+def apply_close_claim(state: ClaimState, close: Any) -> ClaimState:
+    if not isinstance(close, dict) or not close.get("ok"):
+        return state
+    verdict = close.get("verdict")
+    if verdict not in {"confirmed", "falsified", "settled"}:
+        return state
+    summary = str(close.get("outcome") or "").strip()
+    if not summary:
+        return state
+    confidence = close.get("confidence")
+    if confidence is None:
+        if verdict == "confirmed":
+            confidence = 100.0
+        elif verdict == "falsified":
+            confidence = 0.0
+        else:
+            confidence = state.confidence
+    outcome = ClaimOutcome(
+        verdict=verdict,
+        summary=summary,
+        source_url=close.get("source_url") or None,
+        source_title=close.get("source_title") or None,
+    )
+    evidence_for = list(state.evidence_for)
+    evidence_against = list(state.evidence_against)
+    source_url = outcome.source_url
+    if source_url:
+        item = Evidence.make(
+            summary,
+            source_url=source_url,
+            source_title=outcome.source_title,
+            weight=1.0,
+            notes="Primary source for the final outcome.",
+        )
+        bucket = evidence_for if verdict != "falsified" else evidence_against
+        if all((existing.source_url or "").rstrip("/") != source_url.rstrip("/") for existing in bucket):
+            bucket.insert(0, item)
+    return state.model_copy(
+        update={
+            "confidence": _coerce_number(confidence, default=state.confidence),
+            "outcome": outcome,
+            "summary": summary if not state.summary else state.summary,
+            "evidence_for": evidence_for[:12],
+            "evidence_against": evidence_against[:12],
+        }
+    )
 
 
 def _parse_citations(raw: list[dict[str, str]], data: dict[str, Any]) -> list[Citation]:
