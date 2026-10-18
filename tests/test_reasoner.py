@@ -112,6 +112,38 @@ WATCH_HIT = """```json
 ```"""
 
 
+def test_search_links_fill_evidence_without_a_citations_list():
+    payload = """{
+      "statement": "Apple will replace Siri",
+      "confidence": 40,
+      "summary": "Thin sourcing.",
+      "evidence_for": [{"statement": "A report describes the rewrite", "weight": 0.4}],
+      "evidence_against": [],
+      "unknowns": [],
+      "predictions": [],
+      "new_source_urls": ["https://example.com/report"]
+    }"""
+    reasoner = Reasoner(ScriptedModel([{"text": payload, "citations": [{"url": "https://example.com/other", "title": "Other"}]}]))
+    state, _reason, _meta = reasoner.initialize("Apple will replace Siri")
+    assert "citations" not in state.model_dump()
+    assert state.evidence_for[0].source_url == "https://example.com/other"
+    assert state.evidence_for[0].source_title == "Other"
+
+
+def test_legacy_citations_json_still_loads():
+    import json
+
+    from realitydiff.models import ClaimState
+    from tests.test_git_beliefs import state
+
+    payload = state(62).model_dump(mode="json")
+    payload["citations"] = [{"url": "https://example.com/old", "title": "Old"}]
+    loaded = ClaimState.model_validate_json(json.dumps(payload))
+    assert loaded.confidence == 62
+    assert "citations" not in loaded.model_dump()
+    assert loaded.tree_hash() == ClaimState.model_validate(payload).tree_hash()
+
+
 def test_reasoner_initialize_and_watch_noop():
     model = ScriptedModel([INIT, WATCH_NOOP])
     reasoner = Reasoner(model)

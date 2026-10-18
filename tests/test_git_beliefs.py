@@ -101,3 +101,31 @@ def test_commit_diff_blame_revert(tmp_path):
 
     log = living.log()
     assert [c.id for c in log] == [c3.id, c2.id, c1.id]
+
+
+def test_clean_tree_uses_belief_content_not_stored_hash(tmp_path):
+    store = BeliefStore(tmp_path / "beliefs.sqlite")
+    record = store.create_claim("Apple is going to replace Siri with an LLM.")
+    commit = Commit.create(
+        claim_id=record.id,
+        parent_id=None,
+        state=state(62),
+        author="reasoner",
+        message="Initial belief",
+        reason="Mixed rumors.",
+        previous_confidence=None,
+        created_at=ts(1),
+    )
+    store.append_commit(commit)
+    store._conn.execute("UPDATE commits SET tree_hash = ? WHERE id = ?", ("legacy-citations-hash", commit.id))
+    store._conn.commit()
+
+    from realitydiff.claim import Claim
+
+    living = Claim(store, store.get_claim(record.id))
+    try:
+        living.commit("should stay clean")
+    except RuntimeError as exc:
+        assert "clean" in str(exc).lower()
+    else:
+        raise AssertionError("legacy stored hash made an unchanged belief look dirty")

@@ -42,7 +42,7 @@ class Claim:
             if head is None:
                 raise RuntimeError("Nothing to commit")
             working = head.state
-        if head and working.tree_hash() == head.tree_hash:
+        if head and working.tree_hash() == head.state.tree_hash():
             raise RuntimeError("Working tree clean")
         commit = Commit.create(
             claim_id=self.id,
@@ -85,7 +85,7 @@ class Claim:
         head = self.head
         if head is None:
             raise RuntimeError("Nothing to revert")
-        if target.tree_hash == head.tree_hash:
+        if target.state.tree_hash() == head.state.tree_hash():
             raise RuntimeError("HEAD already matches that commit")
         commit = Commit.create(
             claim_id=self.id,

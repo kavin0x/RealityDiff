@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Reality Diff — Git for beliefs</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/static/styles.css?v=0.4.5" />
+  <link rel="stylesheet" href="/static/styles.css?v=0.4.6" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
 </head>
@@ -53,7 +53,7 @@
         <p class="hint why">News feeds overwrite your memory. Reality Diff keeps a git history of a belief: what the internet said, how confident we were, and why that number moved. Diff two weeks, blame a confidence jump, or revert a rumor panic — useful when a claim is still unfolding and you need a trail, not a vibe.</p>
         <ol class="empty-steps">
           <li>open a testable claim</li>
-          <li>inspect for / against / unknowns / citations</li>
+          <li>inspect for / against / unknowns / predictions</li>
           <li>watch, diff, blame, browse a commit, or revert</li>
         </ol>
       </div>
@@ -94,7 +94,6 @@
           <a href="#sec-against">against <span data-count-for="count-against">0</span></a>
           <a href="#sec-unknowns">unknowns <span data-count-for="count-unknowns">0</span></a>
           <a href="#sec-predictions">predictions <span data-count-for="count-predictions">0</span></a>
-          <a href="#sec-citations">citations <span data-count-for="count-citations">0</span></a>
         </nav>
         <div class="actions">
           <div class="action-row">
@@ -143,10 +142,6 @@
           <h3>Belief</h3>
           <p class="summary" id="summary"></p>
         </section>
-        <section class="summary-card" id="sec-citations">
-          <h3>Citations <span class="count" id="count-citations">0</span></h3>
-          <ul id="citations" class="stack"></ul>
-        </section>
       </section>
     </main>
     <div class="gutter" data-side="log" title="Drag to resize"></div>
@@ -175,6 +170,6 @@
     </div>
   </div>
   <div id="toast" class="toast hidden"></div>
-  <script src="/static/app.js?v=0.4.5"></script>
+  <script src="/static/app.js?v=0.4.6"></script>
 </body>
 </html>

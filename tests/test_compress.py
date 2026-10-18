@@ -10,6 +10,12 @@ def test_cosmetic_rewrite_is_not_material():
     assert compact_belief(before)["confidence"] == 62
 
 
+def test_compact_belief_omits_citations():
+    packed = compact_belief(state(62))
+    assert "citations" not in packed
+    assert "evidence_for" in packed
+
+
 def test_new_url_is_material():
     before = state(62)
     extra = Evidence.make(

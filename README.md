@@ -9,7 +9,7 @@ News feeds overwrite your memory. Last week’s confidence on a rumor disappears
 ## News feed vs this
 
 | | Typical news / search | Reality Diff |
-|---|---|---|
+| --- | --- | --- |
 | Memory | Overwritten | Versioned history per claim |
 | Confidence | Vibes / headlines | Explicit score + reason when it moves |
 | Compare | Manual screenshots | `diff` between commits |
@@ -18,17 +18,20 @@ News feeds overwrite your memory. Last week’s confidence on a rumor disappears
 ## Features
 
 **Claims**
+
 - Open a claim (e.g. “Apple is going to replace Siri with an LLM”)
-- Living object: evidence for/against, citations, unknowns, predictions, confidence
+- Living object: evidence for/against, unknowns, predictions, confidence
 - Commits only when **meaningful** new evidence appears (cosmetic rewrites dropped)
 
 **Git-style ops**
+
 - `commit` · `diff` · `blame` · `revert` · `watch` · `log`
 - Browse the belief as of any SHA
 - Background watch via OS timer (macOS LaunchAgent / Linux systemd / Windows task) or the UI interval picker
 
 **Surfaces**
-- Local web UI (`realitydiff serve` → http://localhost:8000)
+
+- Local web UI (`realitydiff serve` → <http://localhost:8000>)
 - CLI for agents and scripts
 - REST API for the same actions
 

@@ -295,12 +295,6 @@ async function selectClaim(id, sha) {
       <span class="w">${p.due ? escapeHtml(p.due) : "no due date"}${p.how_to_falsify ? " · " + escapeHtml(p.how_to_falsify) : ""}</span>`;
     return li;
   }, $("count-predictions"));
-  const citations = state?.citations || collectCitations(state);
-  fillList($("citations"), citations, (c) => {
-    const li = document.createElement("li");
-    li.innerHTML = `<a class="src" href="${escapeAttr(c.url)}" target="_blank" rel="noreferrer">${escapeHtml(c.title || c.url)}</a>`;
-    return li;
-  }, $("count-citations"));
   $("summary").textContent = state?.summary || "";
   lastLog = await api(`/api/claims/${id}/log`, { timeoutMs: 15000 });
   const spark = [...lastLog].reverse().map((c) => c.new_confidence);
@@ -407,19 +401,6 @@ function renderOutcome(outcome, closed) {
     source.textContent = "";
     source.classList.add("hidden");
   }
-}
-
-function collectCitations(state) {
-  if (!state) return [];
-  const seen = new Set();
-  const out = [];
-  for (const item of [...(state.evidence_for || []), ...(state.evidence_against || [])]) {
-    if (item.source_url && !seen.has(item.source_url)) {
-      seen.add(item.source_url);
-      out.push({ url: item.source_url, title: item.source_title || item.source_url });
-    }
-  }
-  return out;
 }
 
 function fillList(ul, items, render, countEl) {

@@ -62,15 +62,6 @@ class Unknown(BaseModel):
         )
 
 
-class Citation(BaseModel):
-    url: str
-    title: str = ""
-
-    @classmethod
-    def make(cls, url: str, title: str = "") -> "Citation":
-        return cls(url=url.strip(), title=(title or "").strip())
-
-
 class ClaimOutcome(BaseModel):
     verdict: Literal["confirmed", "falsified", "settled"]
     summary: str
@@ -112,7 +103,6 @@ class ClaimState(BaseModel):
     evidence_against: list[Evidence] = Field(default_factory=list)
     unknowns: list[Unknown] = Field(default_factory=list)
     predictions: list[Prediction] = Field(default_factory=list)
-    citations: list[Citation] = Field(default_factory=list)
     summary: str = ""
     outcome: ClaimOutcome | None = None
 

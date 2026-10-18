@@ -23,7 +23,6 @@ def compact_belief(state: ClaimState) -> dict[str, Any]:
             for item in state.unknowns
         ],
         "predictions": [_compact_prediction(item) for item in state.predictions],
-        "citations": [{"url": c.url, "title": c.title} for c in state.citations[:24]],
         "outcome": state.outcome.model_dump(mode="json") if state.outcome else None,
     }
 

@@ -82,6 +82,9 @@ def test_ui_keeps_terminal_style_but_is_sparse(tmp_path):
 
         assert 'id="status-filter"' in html
         assert 'id="stat-strip"' in html
+        assert "sec-citations" not in html
+        assert "collectCitations" not in js
+        assert 'id="citations"' not in html
         assert 'id="confidence-card"' in html
         assert 'id="inspector-backdrop"' in html
         assert 'id="keys"' in html

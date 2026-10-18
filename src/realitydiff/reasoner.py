@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from realitydiff.compress import compact_belief, is_material_change
-from realitydiff.models import Citation, ClaimOutcome, ClaimState, Evidence, Prediction, Unknown, utcnow
+from realitydiff.models import ClaimOutcome, ClaimState, Evidence, Prediction, Unknown, utcnow
 from realitydiff.xai import LanguageModel, parse_json_object, XAIError
 
 
@@ -145,7 +145,7 @@ class Reasoner:
         )
         if not data:
             data = {"statement": claim.strip(), "confidence": 50, "reason": ""}
-        state = self._state_from_payload(data, fallback_statement=claim, citations=result.get("citations") or [])
+        state = self._state_from_payload(data, fallback_statement=claim, sources=result.get("citations") or [])
         state = apply_close_claim(state, result.get("close_claim"))
         reason = str(data.get("reason") or (state.outcome.summary if state.outcome else "Initial internet survey."))
         return state, reason, result
@@ -190,7 +190,7 @@ class Reasoner:
                 data,
                 fallback_statement=current.statement,
                 previous=current,
-                citations=result.get("citations") or [],
+                sources=result.get("citations") or [],
             )
         else:
             state = current
@@ -211,7 +211,7 @@ class Reasoner:
         *,
         fallback_statement: str,
         previous: ClaimState | None = None,
-        citations: list[dict[str, str]] | None = None,
+        sources: list[dict[str, str]] | None = None,
     ) -> ClaimState:
         prev_for = {item.id: item for item in previous.evidence_for} if previous else {}
         prev_against = {item.id: item for item in previous.evidence_against} if previous else {}
@@ -220,8 +220,7 @@ class Reasoner:
 
         evidence_for = self._parse_evidence(data.get("evidence_for") or [], prev_for)
         evidence_against = self._parse_evidence(data.get("evidence_against") or [], prev_against)
-        cited = _parse_citations(citations or [], data)
-        evidence_for, evidence_against = _attach_citations(evidence_for, evidence_against, cited)
+        evidence_for, evidence_against = _attach_sources(evidence_for, evidence_against, sources or [], data)
 
         return ClaimState(
             statement=str(data.get("statement") or fallback_statement).strip(),
@@ -232,7 +231,6 @@ class Reasoner:
             evidence_against=evidence_against,
             unknowns=self._parse_unknowns(data.get("unknowns") or [], prev_unknowns),
             predictions=self._parse_predictions(data.get("predictions") or [], prev_preds),
-            citations=cited,
             outcome=previous.outcome if previous else None,
         )
 
@@ -381,8 +379,8 @@ def apply_close_claim(state: ClaimState, close: Any) -> ClaimState:
     )
 
 
-def _parse_citations(raw: list[dict[str, str]], data: dict[str, Any]) -> list[Citation]:
-    found: list[Citation] = []
+def _source_links(raw: list[dict[str, str]], data: dict[str, Any]) -> list[tuple[str, str]]:
+    found: list[tuple[str, str]] = []
     seen: set[str] = set()
 
     def add(url: str, title: str = "") -> None:
@@ -390,7 +388,7 @@ def _parse_citations(raw: list[dict[str, str]], data: dict[str, Any]) -> list[Ci
         if not url.startswith(("http://", "https://")) or url in seen:
             return
         seen.add(url)
-        found.append(Citation.make(url, title))
+        found.append((url, (title or "").strip()))
 
     for item in raw:
         add(item.get("url") or "", item.get("title") or "")
@@ -402,33 +400,28 @@ def _parse_citations(raw: list[dict[str, str]], data: dict[str, Any]) -> list[Ci
     return found[:24]
 
 
-def _attach_citations(
+def _attach_sources(
     for_items: list[Evidence],
     against_items: list[Evidence],
-    citations: list[Citation],
+    raw_sources: list[dict[str, str]],
+    data: dict[str, Any],
 ) -> tuple[list[Evidence], list[Evidence]]:
+    """Fill evidence that omitted a URL using search links. Sources stay on the evidence item."""
+    links = _source_links(raw_sources, data)
     used = {(item.source_url or "").rstrip("/") for item in for_items + against_items if item.source_url}
-    unused = [c for c in citations if c.url.rstrip("/") not in used]
-    patched_for: list[Evidence] = []
-    leftover = list(unused)
-    for item in for_items:
-        if item.source_url or not leftover:
-            patched_for.append(item)
-            continue
-        cite = leftover.pop(0)
-        patched_for.append(
-            item.model_copy(update={"source_url": cite.url, "source_title": item.source_title or cite.title})
-        )
-    patched_against: list[Evidence] = []
-    for item in against_items:
-        if item.source_url or not leftover:
-            patched_against.append(item)
-            continue
-        cite = leftover.pop(0)
-        patched_against.append(
-            item.model_copy(update={"source_url": cite.url, "source_title": item.source_title or cite.title})
-        )
-    return patched_for, patched_against
+    leftover = [(url, title) for url, title in links if url.rstrip("/") not in used]
+
+    def patch(items: list[Evidence]) -> list[Evidence]:
+        patched: list[Evidence] = []
+        for item in items:
+            if item.source_url or not leftover:
+                patched.append(item)
+                continue
+            url, title = leftover.pop(0)
+            patched.append(item.model_copy(update={"source_url": url, "source_title": item.source_title or title}))
+        return patched
+
+    return patch(for_items), patch(against_items)
 
 
 def _coerce_number(value: Any, *, default: float, lo: float = 0.0, hi: float = 100.0) -> float:
