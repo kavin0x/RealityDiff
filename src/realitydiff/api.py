@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from realitydiff import __version__
+from realitydiff.config import default_db, load_env
 from realitydiff.models import BlameReport, ClaimDiff, ClaimRecord, Commit, WatchResult
 from realitydiff.schedule import install as install_service
 from realitydiff.schedule import status as service_status
@@ -22,7 +22,8 @@ from realitydiff.xai import XAIError
 
 
 STATIC = Path(__file__).parent / "static"
-DEFAULT_DB = os.environ.get("REALITYDIFF_DB", "data/realitydiff.sqlite")
+load_env()
+DEFAULT_DB = default_db()
 log = logging.getLogger("realitydiff.api")
 
 
@@ -229,7 +230,7 @@ def create_app(
 
     @app.get("/api/service")
     def get_service() -> dict:
-        return service_status()
+        return {**service_status(), "db": str(Path(engine.store.path).expanduser().resolve())}
 
     @app.post("/api/service")
     def put_service(body: ServiceBody) -> dict:

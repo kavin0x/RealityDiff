@@ -35,7 +35,42 @@ News feeds overwrite your memory. Last week’s confidence on a rumor disappears
 - CLI for agents and scripts
 - REST API for the same actions
 
-## Try it
+## Install
+
+One line (macOS or Linux, no sudo):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kavin0x/RealityDiff/main/install.sh | sh
+```
+
+It installs [uv](https://docs.astral.sh/uv/) into `~/.local/bin` if you don't have it, installs `realitydiff` as an isolated uv tool, and can save your `XAI_API_KEY` to `~/.config/realitydiff/env` (permissions 600). It never uses sudo and only touches your shell rc if you say yes.
+
+```bash
+# options go after `sh -s --`
+curl -fsSL https://raw.githubusercontent.com/kavin0x/RealityDiff/main/install.sh | sh -s -- --yes          # no prompts
+curl -fsSL https://raw.githubusercontent.com/kavin0x/RealityDiff/main/install.sh | sh -s -- --ref <tag-or-commit>
+curl -fsSL https://raw.githubusercontent.com/kavin0x/RealityDiff/main/install.sh | sh -s -- --uninstall
+```
+
+Prefer to read it first? Download `install.sh`, look it over, then run `sh install.sh --help`.
+
+Or install by hand:
+
+```bash
+uv tool install "realitydiff @ https://github.com/kavin0x/RealityDiff/archive/main.tar.gz"
+# or
+pipx install "realitydiff @ https://github.com/kavin0x/RealityDiff/archive/main.tar.gz"
+```
+
+Then:
+
+```bash
+realitydiff serve --host 127.0.0.1   # open http://127.0.0.1:8000
+```
+
+The installed CLI keeps claims in `~/.local/share/realitydiff/` (set `REALITYDIFF_DB` to change it). Inside a checkout it still uses `data/`.
+
+## Try it (from a checkout)
 
 ```bash
 export XAI_API_KEY=...

@@ -19,7 +19,7 @@ def install(interval_seconds: int, *, db: str, env: dict[str, str] | None = None
     if system == "Darwin":
         path = _macos_plist_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(_macos_plist(interval_seconds, env), encoding="utf-8")
+        _write_private(path, _macos_plist(interval_seconds, env))
         _run(["launchctl", "unload", str(path)], check=False)
         _run(["launchctl", "load", str(path)])
         return {"platform": "darwin", "path": str(path), "interval_seconds": str(interval_seconds)}
@@ -28,8 +28,8 @@ def install(interval_seconds: int, *, db: str, env: dict[str, str] | None = None
         unit_dir.mkdir(parents=True, exist_ok=True)
         service = unit_dir / "realitydiff-watch.service"
         timer = unit_dir / "realitydiff-watch.timer"
-        service.write_text(_systemd_service(env), encoding="utf-8")
-        timer.write_text(_systemd_timer(interval_seconds), encoding="utf-8")
+        _write_private(service, _systemd_service(env))
+        _write_private(timer, _systemd_timer(interval_seconds))
         _run(["systemctl", "--user", "daemon-reload"])
         _run(["systemctl", "--user", "enable", "--now", "realitydiff-watch.timer"])
         return {"platform": "linux", "path": str(timer), "interval_seconds": str(interval_seconds)}
@@ -37,7 +37,7 @@ def install(interval_seconds: int, *, db: str, env: dict[str, str] | None = None
         minutes = max(1, round(interval_seconds / 60))
         script = _windows_script_path()
         script.parent.mkdir(parents=True, exist_ok=True)
-        script.write_text(_windows_cmd(env), encoding="utf-8")
+        _write_private(script, _windows_cmd(env))
         _run(
             [
                 "schtasks",
@@ -98,13 +98,24 @@ def status() -> dict[str, str]:
 
 
 def _watch_env(db: str) -> dict[str, str]:
-    env = {
+    # XAI_API_KEY is deliberately not copied here: service files are plain
+    # text on disk. The watcher runs the CLI, which loads the key from
+    # ~/.config/realitydiff/env (see realitydiff.config).
+    return {
         "REALITYDIFF_DB": str(Path(db).expanduser().resolve()),
         "PATH": os.environ.get("PATH", ""),
     }
-    if os.environ.get("XAI_API_KEY"):
-        env["XAI_API_KEY"] = os.environ["XAI_API_KEY"]
-    return env
+
+
+def _write_private(path: Path, text: str) -> None:
+    """Write a file readable only by the current user (0600)."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 def _windows_script_path() -> Path:

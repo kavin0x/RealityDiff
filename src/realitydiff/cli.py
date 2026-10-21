@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
+from realitydiff import __version__
+from realitydiff.config import config_file, default_db, load_env
 from realitydiff.service import RealityDiff
+from realitydiff.xai import XAIError
 
-DEFAULT_DB = os.environ.get("REALITYDIFF_DB", "data/realitydiff.sqlite")
+load_env()
+DEFAULT_DB = default_db()
+
+
+def _db_path() -> str:
+    return str(Path(DEFAULT_DB).expanduser().resolve())
 
 
 def _engine() -> RealityDiff:
@@ -24,6 +31,7 @@ def _print(data) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="realitydiff", description="Git for beliefs")
+    parser.add_argument("--version", action="version", version=f"realitydiff {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     open_p = sub.add_parser("open", help="Create a living claim and survey the internet")
@@ -73,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "serve":
         import uvicorn
 
+        print(f"realitydiff: database {_db_path()}", file=sys.stderr)
         uvicorn.run("realitydiff.api:create_app", host=args.host, port=args.port, factory=True, reload=False)
         return 0
 
@@ -85,10 +94,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.service_cmd == "uninstall":
             _print(uninstall())
             return 0
-        _print(status())
+        _print({**status(), "db": _db_path()})
         return 0
 
-    engine = _engine()
+    try:
+        engine = _engine()
+    except XAIError as exc:
+        print(f"realitydiff: {exc}. Export it or save it in {config_file()}", file=sys.stderr)
+        return 2
     if args.cmd == "watch-all":
         _print([item.model_dump(mode="json") for item in engine.watch_due()])
         return 0
