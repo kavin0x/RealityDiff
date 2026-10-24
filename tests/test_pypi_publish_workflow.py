@@ -9,6 +9,7 @@ PINNED_ACTIONS = {
     "astral-sh/setup-uv": "07a047e608db84b3d8c06cd9a7c7dcc9c355c18e",
     "actions/upload-artifact": "cf430e030ddbb5b0abf93d22962f4752f3646cd9",
     "actions/download-artifact": "9000827ccba6bdab643e8b6fd33ac0654aef8333",
+    "oven-sh/setup-bun": "0c5077e51419868618aeaa5fe8019c62421857d6",
     "pypa/gh-action-pypi-publish": "7245906fb61fa33a13554f9d5fb856fe61758086",
 }
 
