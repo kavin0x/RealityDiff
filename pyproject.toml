@@ -1,15 +1,32 @@
 [project]
 name = "realitydiff"
-version = "0.4.0"
+version = "0.5.0"
 description = "Git for beliefs — living claims that watch the internet and version confidence."
 readme = "README.md"
 requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Kavin Shah" }]
+keywords = ["claims", "beliefs", "fact-checking", "xai", "grok"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
     "fastapi>=0.115.0",
     "httpx>=0.28.0",
     "pydantic>=2.10.0",
     "uvicorn[standard]>=0.34.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/kavin0x/RealityDiff"
+Source = "https://github.com/kavin0x/RealityDiff"
+Issues = "https://github.com/kavin0x/RealityDiff/issues"
 
 [project.optional-dependencies]
 dev = [

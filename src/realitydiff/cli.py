@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from realitydiff import __version__
 from realitydiff.config import config_file, default_db, load_env
+from realitydiff.setup import needs_first_run, run_setup
 from realitydiff.service import RealityDiff
 from realitydiff.xai import XAIError
 
@@ -29,10 +31,32 @@ def _print(data) -> None:
         print(json.dumps(data, indent=2, default=str))
 
 
+def _ensure_key() -> bool:
+    """True when an xAI key is available. Offers first-run setup to a person at a terminal."""
+    if os.environ.get("XAI_API_KEY"):
+        return True
+    if needs_first_run():
+        print("realitydiff: first run, so let's set up.\n", file=sys.stderr)
+        run_setup()
+        print()
+        load_env()
+        if os.environ.get("XAI_API_KEY"):
+            return True
+    print(
+        f"realitydiff: XAI_API_KEY is not set. Run `realitydiff setup`, export it, or save it in {config_file()}",
+        file=sys.stderr,
+    )
+    return False
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="realitydiff", description="Git for beliefs")
     parser.add_argument("--version", action="version", version=f"realitydiff {__version__}")
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub = parser.add_subparsers(dest="cmd")
+
+    setup_p = sub.add_parser("setup", help="Guided setup: save your xAI key and check your PATH")
+    setup_p.add_argument("-y", "--yes", action="store_true", help="Non-interactive: accept defaults, never prompt")
+    setup_p.add_argument("--no-key", action="store_true", help="Skip the XAI_API_KEY prompt")
 
     open_p = sub.add_parser("open", help="Create a living claim and survey the internet")
     open_p.add_argument("statement")
@@ -67,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     ls_p = sub.add_parser("ls", help="List claims")
 
     serve_p = sub.add_parser("serve", help="Run the web UI")
-    serve_p.add_argument("--host", default="0.0.0.0")
+    serve_p.add_argument("--host", default="127.0.0.1", help="Bind address. Use 0.0.0.0 only if you want other machines to reach it")
     serve_p.add_argument("--port", type=int, default=8000)
 
     svc = sub.add_parser("service", help="Install a background timer that runs claim.watch()")
@@ -78,7 +102,16 @@ def main(argv: list[str] | None = None) -> int:
     svc_sub.add_parser("status", help="Show whether the service is installed")
 
     args = parser.parse_args(argv)
+    if args.cmd is None:
+        if needs_first_run():
+            return run_setup()
+        parser.print_help()
+        return 0
+    if args.cmd == "setup":
+        return run_setup(assume_yes=args.yes, skip_key=args.no_key)
     if args.cmd == "serve":
+        if not _ensure_key():
+            return 2
         import uvicorn
 
         print(f"realitydiff: database {_db_path()}", file=sys.stderr)
@@ -97,10 +130,12 @@ def main(argv: list[str] | None = None) -> int:
         _print({**status(), "db": _db_path()})
         return 0
 
+    if not _ensure_key():
+        return 2
     try:
         engine = _engine()
     except XAIError as exc:
-        print(f"realitydiff: {exc}. Export it or save it in {config_file()}", file=sys.stderr)
+        print(f"realitydiff: {exc}", file=sys.stderr)
         return 2
     if args.cmd == "watch-all":
         _print([item.model_dump(mode="json") for item in engine.watch_due()])

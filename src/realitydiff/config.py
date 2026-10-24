@@ -64,3 +64,70 @@ def default_db() -> str:
         return "data/realitydiff.sqlite"
     base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
     return str(Path(base) / "realitydiff" / "realitydiff.sqlite")
+
+
+_KEY_OK = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")
+
+
+def valid_secret(value: str) -> bool:
+    """Same rule as install.sh: no spaces, quotes or newlines."""
+    return bool(value) and all(ch in _KEY_OK for ch in value)
+
+
+def config_has(key: str, path: Path | None = None) -> bool:
+    path = path or config_file()
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        name, sep, value = line.partition("=")
+        if sep and name.strip() == key and value.strip():
+            return True
+    return False
+
+
+def set_config(key: str, value: str, path: Path | None = None) -> Path:
+    """Write KEY=VALUE to the config file (mode 600), keeping other lines."""
+    path = path or config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.chmod(0o700)
+    except OSError:
+        pass
+    kept: list[str] = []
+    try:
+        existing = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        existing = ["# Reality Diff settings (read by the realitydiff CLI). Keep private."]
+    for raw in existing:
+        line = raw.strip()
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if line.partition("=")[0].strip() == key and "=" in line:
+            continue
+        kept.append(raw)
+    kept.append(f"{key}={value}")
+    tmp = path.with_name(path.name + f".tmp{os.getpid()}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(kept) + "\n")
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return path
+
+
+def setup_marker() -> Path:
+    return config_file().with_name("setup-done")
