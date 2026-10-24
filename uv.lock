@@ -416,7 +416,7 @@ wheels = [
 
 [[package]]
 name = "realitydiff"
-version = "0.5.0"
+version = "0.4.1"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
