@@ -12,15 +12,31 @@ from realitydiff.models import Commit, WatchResult
 from realitydiff.reasoner import Reasoner
 from realitydiff.store import BeliefStore
 from realitydiff.providers import default_xai_models
-from realitydiff.xai import LanguageModel, XAIClient
+from realitydiff.xai import LanguageModel, XAIClient, XAIError
 
 log = logging.getLogger("realitydiff.service")
+
+
+class _MissingXAIKey:
+    """Stand-in so the UI and compare still run with only an OpenRouter key."""
+
+    last_model = None
+
+    def complete(self, *args, **kwargs):
+        raise XAIError("XAI_API_KEY is not set. Claims and watch need an xAI key; compare can use OpenRouter alone.")
+
+
+def _default_model() -> LanguageModel:
+    try:
+        return XAIClient(models=default_xai_models())
+    except XAIError:
+        return _MissingXAIKey()
 
 
 class RealityDiff:
     def __init__(self, store: BeliefStore, model: LanguageModel | None = None) -> None:
         self.store = store
-        self.model = model or XAIClient(models=default_xai_models())
+        self.model = model or _default_model()
         self.reasoner = Reasoner(self.model)
         self._watch_locks: dict[str, threading.Lock] = {}
         self._watch_meta = threading.Lock()

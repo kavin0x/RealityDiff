@@ -165,3 +165,15 @@ def test_run_compare_does_not_need_store():
     payload = asyncio.run(go())
     assert payload["results"][0]["status"] == "ok"
     assert "id" not in payload
+
+
+def test_engine_starts_without_xai_key(tmp_path, monkeypatch):
+    import pytest
+
+    from realitydiff.service import RealityDiff
+    from realitydiff.xai import XAIError
+
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+    engine = RealityDiff.open(tmp_path / "rd.db")
+    with pytest.raises(XAIError):
+        engine.open_claim("Apple will replace Siri with an LLM.")
