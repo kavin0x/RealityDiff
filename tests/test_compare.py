@@ -15,6 +15,8 @@ from tests.test_reasoner import INIT, ScriptedModel
 def no_live_provider_keys(monkeypatch):
     monkeypatch.delenv("XAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    for name in ("REALITYDIFF_MAX_TOKENS", "REALITYDIFF_COMPARE_MODELS", "REALITYDIFF_COMPARE_PER_MINUTE"):
+        monkeypatch.delenv(name, raising=False)
 
 
 def _app(tmp_path):

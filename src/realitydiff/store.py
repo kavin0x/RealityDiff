@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
 import threading
 from datetime import datetime
@@ -210,7 +211,7 @@ class BeliefStore:
 
     def save_compare_run(self, question: str, results: list[dict]) -> dict[str, str]:
         created = utcnow()
-        run_id = f"cmp_{sha1_hex(question + created.isoformat())[:12]}"
+        run_id = f"cmp_{sha1_hex(question + created.isoformat())[:12]}_{secrets.token_hex(4)}"
         payload = json.dumps(results)
         with self._lock:
             self._conn.execute(

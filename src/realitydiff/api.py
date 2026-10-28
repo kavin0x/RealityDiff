@@ -16,7 +16,7 @@ from realitydiff.models import BlameReport, ClaimDiff, ClaimRecord, Commit, Watc
 from realitydiff.schedule import install as install_service
 from realitydiff.schedule import status as service_status
 from realitydiff.schedule import uninstall as uninstall_service
-from realitydiff.compare import run_compare
+from realitydiff.compare import CompareLimits, CompareRateLimited, run_compare
 from realitydiff.providers import default_openrouter_model, default_xai_models, provider_key
 from realitydiff.service import RealityDiff
 from realitydiff.watcher import WatchLoop
@@ -83,13 +83,18 @@ def create_app(
     app = FastAPI(title="Reality Diff", version=__version__, lifespan=lifespan)
     app.state.engine = engine
     app.state.watcher = watcher
+    app.state.compare_limits = CompareLimits()
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_exc(request: Request, exc: StarletteHTTPException):
         detail = exc.detail
         if not isinstance(detail, str):
             detail = str(detail)
-        return JSONResponse(status_code=exc.status_code, content={"detail": detail})
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": detail},
+            headers=getattr(exc, "headers", None),
+        )
 
     @app.get("/api/providers")
     def providers() -> dict:
@@ -110,7 +115,12 @@ def create_app(
                 [item.model_dump() for item in body.models],
                 timeout=body.timeout_seconds,
                 store=engine.store,
+                limits=app.state.compare_limits,
             )
+        except CompareRateLimited as exc:
+            raise HTTPException(
+                429, str(exc), headers={"Retry-After": str(exc.retry_after)}
+            ) from exc
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 

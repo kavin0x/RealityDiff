@@ -22,6 +22,9 @@ DEFAULT_OPENROUTER_MODEL = "openai/gpt-4o-mini"
 DEFAULT_CHAT_TIMEOUT = 45.0
 MAX_CHAT_TIMEOUT = 120.0
 MAX_COMPARE_MODELS = 6
+DEFAULT_MAX_TOKENS = 1024
+MIN_MAX_TOKENS = 16
+MAX_MAX_TOKENS = 8192
 PROVIDERS = ("xai", "openrouter")
 
 _BEARER = re.compile(r"(Bearer )\S+", re.IGNORECASE)
@@ -60,6 +63,18 @@ def default_xai_models() -> tuple[str, ...]:
 
 def default_openrouter_model() -> str:
     return (os.environ.get("OPENROUTER_MODEL") or DEFAULT_OPENROUTER_MODEL).strip()
+
+
+def max_output_tokens() -> int:
+    """Output token ceiling per chat call, from REALITYDIFF_MAX_TOKENS (clamped)."""
+    raw = (os.environ.get("REALITYDIFF_MAX_TOKENS") or "").strip()
+    if not raw:
+        return DEFAULT_MAX_TOKENS
+    try:
+        number = int(raw)
+    except ValueError:
+        return DEFAULT_MAX_TOKENS
+    return max(MIN_MAX_TOKENS, min(MAX_MAX_TOKENS, number))
 
 
 def provider_key(name: str) -> str:
@@ -244,6 +259,7 @@ def _chat_body(model: str, prompt: str) -> dict[str, Any]:
     return {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_output_tokens(),
     }
 
 

@@ -85,6 +85,23 @@ uv run realitydiff serve               # 127.0.0.1:8000
 
 The web UI and API have no login. `serve` binds to 127.0.0.1 by default; if you pass `--host 0.0.0.0`, anyone on your network can run compare and watch on your API keys and spend your credits. Keys never leave the server, but the calls they pay for can.
 
+### Compare spend limits
+
+I put a few brakes on compare so one bad afternoon can't drain a key:
+
+- Every chat call asks for at most 1024 output tokens. Change it with `REALITYDIFF_MAX_TOKENS` (I clamp it to 16 through 8192).
+- At most 3 model calls run at the same time across all compare requests. Extra ones wait their turn.
+- At most 30 model calls per minute in total (a 6 model compare counts as 6). Past that, the API answers 429 with a `Retry-After` header. Change it with `REALITYDIFF_COMPARE_PER_MINUTE` (1 through 600).
+- If you set `REALITYDIFF_COMPARE_MODELS`, only those models can run. It's comma separated: `openrouter:openai/gpt-4o-mini` pins a provider, a bare id like `grok-4.3` works on either one. Leave it unset and any model id goes.
+
+```bash
+export REALITYDIFF_MAX_TOKENS=1024
+export REALITYDIFF_COMPARE_PER_MINUTE=30
+export REALITYDIFF_COMPARE_MODELS="openrouter:openai/gpt-4o-mini,grok-4.3"
+```
+
+These can also go in `~/.config/realitydiff/env`. All of this lives in the app, so it only helps while the app is the thing spending. I'd also set a credit limit on the OpenRouter key itself (openrouter.ai, Keys page, edit the key) so the cap holds even if something else gets the key.
+
 ```bash
 uv run realitydiff open "Apple is going to replace Siri with an LLM."
 uv run realitydiff open --model grok-4.3 "..."

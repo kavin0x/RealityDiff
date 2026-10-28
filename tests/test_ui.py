@@ -136,3 +136,11 @@ if (weightPercent("nope") !== 0) throw new Error("nan");
 """
     result = subprocess.run(["bun", "-e", script], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_compare_hint_is_neutral():
+    from pathlib import Path
+
+    html = (Path(__file__).resolve().parents[1] / "src/realitydiff/static/index.html").read_text()
+    assert "pretend" not in html
+    assert "Enter the model ids to compare" in html
