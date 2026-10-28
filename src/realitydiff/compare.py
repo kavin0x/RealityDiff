@@ -62,8 +62,9 @@ async def run_compare(
     *,
     timeout: float | None = None,
     store: BeliefStore | None = None,
-    factory=make_chat_provider,
+    factory=None,
 ) -> dict[str, Any]:
+    factory = factory or make_chat_provider
     question = (question or "").strip()
     if len(question) < 3:
         raise ValueError("Question is too short")

@@ -25,6 +25,7 @@ MAX_COMPARE_MODELS = 6
 PROVIDERS = ("xai", "openrouter")
 
 _BEARER = re.compile(r"(Bearer )\S+", re.IGNORECASE)
+_KEYISH = re.compile(r"(?i)(?:sk-or-v1-|sk-proj-|xai-)[A-Za-z0-9._\-]+")
 
 
 class ProviderError(RuntimeError):
@@ -38,6 +39,7 @@ def redact_secrets(text: str, *secrets: str) -> str:
         if secret:
             out = out.replace(secret, "[redacted]")
     out = _BEARER.sub(r"\1[redacted]", out)
+    out = _KEYISH.sub("[redacted]", out)
     return out
 
 

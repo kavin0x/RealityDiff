@@ -434,7 +434,7 @@ a.src:hover { text-decoration: underline; }
   padding: 18px 16px;
   min-height: 160px;
 }
-.compare-card h3 { margin: 0 0 8px; font-size: 13px; }
+.compare-card h3 { margin: 0 0 8px; font-size: 14px; }
 .compare-meta { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
 .compare-card .answer { white-space: pre-wrap; margin: 0; }
 .compare-card.error { border-color: var(--danger); }
