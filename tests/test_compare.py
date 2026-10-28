@@ -51,7 +51,7 @@ def test_compare_one_failure_does_not_fail_the_others(tmp_path, monkeypatch):
     monkeypatch.delenv("XAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setattr("realitydiff.compare.make_chat_provider", ScriptedChat)
-    with TestClient(_app(tmp_path)) as client:
+    with TestClient(_app(tmp_path), base_url="http://127.0.0.1:8000") as client:
         res = client.post(
             "/api/compare",
             json={
@@ -80,7 +80,7 @@ def test_compare_timeout_is_isolated(tmp_path, monkeypatch):
     monkeypatch.delenv("XAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setattr("realitydiff.compare.make_chat_provider", ScriptedChat)
-    with TestClient(_app(tmp_path)) as client:
+    with TestClient(_app(tmp_path), base_url="http://127.0.0.1:8000") as client:
         res = client.post(
             "/api/compare",
             json={
@@ -102,7 +102,7 @@ def test_compare_timeout_is_isolated(tmp_path, monkeypatch):
 def test_compare_caps_model_count(tmp_path, monkeypatch):
     monkeypatch.setattr("realitydiff.compare.make_chat_provider", ScriptedChat)
     models = [{"provider": "xai", "model": f"m{i}"} for i in range(MAX_COMPARE_MODELS + 1)]
-    with TestClient(_app(tmp_path)) as client:
+    with TestClient(_app(tmp_path), base_url="http://127.0.0.1:8000") as client:
         res = client.post("/api/compare", json={"question": "too many", "models": models})
         assert res.status_code == 400
         assert "At most" in res.json()["detail"]

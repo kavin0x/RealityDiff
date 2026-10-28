@@ -142,12 +142,25 @@ def main(argv: list[str] | None = None) -> int:
         import uvicorn
 
         print(f"realitydiff: database {_db_path()}", file=sys.stderr)
-        if args.host not in {"127.0.0.1", "localhost", "::1"}:
+        from realitydiff.security import ALLOWED_HOSTS_ENV, BIND_ENV, bind_check, is_loopback
+
+        refusal = bind_check(args.host)
+        if refusal:
+            print(f"realitydiff: {refusal}", file=sys.stderr)
+            return 2
+        os.environ[BIND_ENV] = args.host
+        if not is_loopback(args.host):
             print(
-                f"realitydiff: warning: serving on {args.host}. The API has no login, so anyone who can reach "
-                "this port can read your claims and run compare or watch on your API keys (and your credits).",
+                f"realitydiff: serving on {args.host}. Every /api/ request needs your REALITYDIFF_TOKEN "
+                "(Authorization: Bearer or X-RealityDiff-Token). Plain HTTP, so only do this on a network you trust.",
                 file=sys.stderr,
             )
+            if not os.environ.get(ALLOWED_HOSTS_ENV) and args.host in {"0.0.0.0", "::"}:
+                print(
+                    f"realitydiff: only loopback Host names are accepted. Set {ALLOWED_HOSTS_ENV} to the names "
+                    "other machines use to reach this one (comma separated, * for any).",
+                    file=sys.stderr,
+                )
         uvicorn.run("realitydiff.api:create_app", host=args.host, port=args.port, factory=True, reload=False)
         return 0
 

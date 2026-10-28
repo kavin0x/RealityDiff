@@ -173,7 +173,7 @@ def test_http_watch_returns_closed(tmp_path):
     from realitydiff.api import create_app
 
     engine = RealityDiff(BeliefStore(tmp_path / "db.sqlite"), model=ScriptedModel([INIT, WATCH_CLOSE]))
-    with TestClient(create_app(engine, start_watcher=False)) as client:
+    with TestClient(create_app(engine, start_watcher=False), base_url="http://127.0.0.1:8000") as client:
         created = client.post("/api/claims", json={"statement": "Apple is going to replace Siri with an LLM."})
         claim_id = created.json()["claim"]["id"]
         watched = client.post(f"/api/claims/{claim_id}/watch")

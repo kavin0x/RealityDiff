@@ -12,7 +12,7 @@ from tests.test_reasoner import INIT, ScriptedModel
 
 def _client(tmp_path):
     engine = RealityDiff(BeliefStore(tmp_path / "db.sqlite"), model=ScriptedModel([INIT]))
-    return TestClient(create_app(engine, start_watcher=False))
+    return TestClient(create_app(engine, start_watcher=False), base_url="http://127.0.0.1:8000")
 
 
 def test_ui_keeps_terminal_style_but_is_sparse(tmp_path):

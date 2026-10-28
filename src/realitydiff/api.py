@@ -18,6 +18,7 @@ from realitydiff.schedule import status as service_status
 from realitydiff.schedule import uninstall as uninstall_service
 from realitydiff.compare import CompareLimits, CompareRateLimited, run_compare
 from realitydiff.providers import default_openrouter_model, default_xai_models, provider_key
+from realitydiff.security import LocalGuard, guard_settings
 from realitydiff.service import RealityDiff
 from realitydiff.watcher import WatchLoop
 from realitydiff.xai import XAIError
@@ -69,7 +70,10 @@ def create_app(
     engine: RealityDiff | None = None,
     *,
     start_watcher: bool = True,
+    bind_host: str | None = None,
+    token: str | None = None,
 ) -> FastAPI:
+    hosts, required_token = guard_settings(bind_host, token)
     engine = engine or RealityDiff.open(DEFAULT_DB)
     watcher = WatchLoop(engine)
 
@@ -84,6 +88,7 @@ def create_app(
     app.state.engine = engine
     app.state.watcher = watcher
     app.state.compare_limits = CompareLimits()
+    app.add_middleware(LocalGuard, hosts=hosts, token=required_token)
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_exc(request: Request, exc: StarletteHTTPException):

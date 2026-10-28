@@ -8,7 +8,7 @@ from tests.test_reasoner import INIT, WATCH_HIT, ScriptedModel
 
 def test_http_git_surface(tmp_path):
     engine = RealityDiff(BeliefStore(tmp_path / "db.sqlite"), model=ScriptedModel([INIT, WATCH_HIT]))
-    with TestClient(create_app(engine, start_watcher=False)) as client:
+    with TestClient(create_app(engine, start_watcher=False), base_url="http://127.0.0.1:8000") as client:
         assert client.get("/api/health").json()["status"] == "ok"
         assert client.get("/api/health").json()["version"]
         created = client.post(

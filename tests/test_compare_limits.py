@@ -164,7 +164,7 @@ def test_api_returns_429_with_retry_after(tmp_path, monkeypatch):
             {"provider": "xai", "model": "c"},
         ],
     }
-    with TestClient(_app(tmp_path)) as client:
+    with TestClient(_app(tmp_path), base_url="http://127.0.0.1:8000") as client:
         first = client.post("/api/compare", json=body)
         assert first.status_code == 200
         second = client.post("/api/compare", json=body)
@@ -180,7 +180,7 @@ def test_api_returns_429_with_retry_after(tmp_path, monkeypatch):
 
 def test_allowlist_unset_allows_any_model(tmp_path, monkeypatch):
     monkeypatch.setattr("realitydiff.compare.make_chat_provider", EchoChat)
-    with TestClient(_app(tmp_path)) as client:
+    with TestClient(_app(tmp_path), base_url="http://127.0.0.1:8000") as client:
         res = client.post(
             "/api/compare",
             json={"question": "Is the sky blue?", "models": [{"provider": "openrouter", "model": "any/expensive-model"}]},
@@ -201,7 +201,7 @@ def test_allowlist_blocks_other_models(tmp_path, monkeypatch):
             return await super().achat(prompt, model=model, timeout=timeout)
 
     monkeypatch.setattr("realitydiff.compare.make_chat_provider", CountingChat)
-    with TestClient(_app(tmp_path)) as client:
+    with TestClient(_app(tmp_path), base_url="http://127.0.0.1:8000") as client:
         ok = client.post(
             "/api/compare",
             json={

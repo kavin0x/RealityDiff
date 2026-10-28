@@ -19,20 +19,39 @@ function errorMessage(data, fallback) {
   return fallback;
 }
 
-async function api(path, opts = {}) {
+const TOKEN_KEY = "rd-token";
+
+function authHeaders() {
+  const token = sessionStorage.getItem(TOKEN_KEY);
+  return token ? { "X-RealityDiff-Token": token } : {};
+}
+
+async function api(path, opts = {}, retried = false) {
   const { timeoutMs = 240000, ...fetchOpts } = opts;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(path, {
-      headers: { "Content-Type": "application/json" },
       ...fetchOpts,
+      headers: { "Content-Type": "application/json", ...authHeaders(), ...(fetchOpts.headers || {}) },
       signal: controller.signal,
     });
+    if (res.status === 401 && !retried) {
+      // Only happens when serve runs beyond localhost with REALITYDIFF_TOKEN set.
+      const token = window.prompt("This server needs its REALITYDIFF_TOKEN");
+      if (token) {
+        sessionStorage.setItem(TOKEN_KEY, token.trim());
+        clearTimeout(timer);
+        return api(path, opts, true);
+      }
+    }
     const text = await res.text();
     let data;
     try { data = text ? JSON.parse(text) : null; } catch { data = { detail: text }; }
-    if (!res.ok) throw new Error(errorMessage(data, res.statusText));
+    if (!res.ok) {
+      if (res.status === 401) sessionStorage.removeItem(TOKEN_KEY);
+      throw new Error(errorMessage(data, res.statusText));
+    }
     return data;
   } catch (err) {
     if (err.name === "AbortError") throw new Error("Request timed out. Try again.");

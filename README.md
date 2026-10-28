@@ -83,7 +83,20 @@ uv run realitydiff serve               # 127.0.0.1:8000
 # open http://127.0.0.1:8000 then click "compare models"
 ```
 
-The web UI and API have no login. `serve` binds to 127.0.0.1 by default; if you pass `--host 0.0.0.0`, anyone on your network can run compare and watch on your API keys and spend your credits. Keys never leave the server, but the calls they pay for can.
+### Localhost only by default
+
+The web UI and API have no accounts. It's alpha software and I built it to run on your own machine, so `realitydiff serve` binds to 127.0.0.1 and guards that:
+
+- It only answers requests whose Host header is `127.0.0.1`, `localhost` or `[::1]` (any port). Anything else gets a 400. That blocks DNS rebinding, where a web page you visit points its own domain at 127.0.0.1 to reach your server.
+- A browser POST or DELETE from another site's Origin gets a 403. Requests with no Origin header (curl, scripts) still work.
+- The CLI `compare` command talks to the providers directly, so none of this touches it.
+
+If you really want other machines to reach it, `serve` won't start on a non-loopback `--host` until you set `REALITYDIFF_TOKEN` (in your env or `~/.config/realitydiff/env`). Then every `/api/` call needs it, as `Authorization: Bearer <token>` or an `X-RealityDiff-Token` header. The web UI asks for it once per tab. Add the names other machines use to reach you with `REALITYDIFF_ALLOWED_HOSTS` (comma separated, `*` for any). It's still plain HTTP, so I'd only do this on a network you trust, and I'd put a spend limit on your OpenRouter key too.
+
+```bash
+export REALITYDIFF_TOKEN="$(openssl rand -hex 32)"
+REALITYDIFF_ALLOWED_HOSTS=mybox.local uv run realitydiff serve --host 0.0.0.0
+```
 
 ### Compare spend limits
 
