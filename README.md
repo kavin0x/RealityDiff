@@ -83,6 +83,8 @@ uv run realitydiff serve               # 127.0.0.1:8000
 # open http://127.0.0.1:8000 then click "compare models"
 ```
 
+The web UI and API have no login. `serve` binds to 127.0.0.1 by default; if you pass `--host 0.0.0.0`, anyone on your network can run compare and watch on your API keys and spend your credits. Keys never leave the server, but the calls they pay for can.
+
 ```bash
 uv run realitydiff open "Apple is going to replace Siri with an LLM."
 uv run realitydiff open --model grok-4.3 "..."

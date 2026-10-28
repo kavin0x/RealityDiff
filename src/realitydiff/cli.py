@@ -142,6 +142,12 @@ def main(argv: list[str] | None = None) -> int:
         import uvicorn
 
         print(f"realitydiff: database {_db_path()}", file=sys.stderr)
+        if args.host not in {"127.0.0.1", "localhost", "::1"}:
+            print(
+                f"realitydiff: warning: serving on {args.host}. The API has no login, so anyone who can reach "
+                "this port can read your claims and run compare or watch on your API keys (and your credits).",
+                file=sys.stderr,
+            )
         uvicorn.run("realitydiff.api:create_app", host=args.host, port=args.port, factory=True, reload=False)
         return 0
 
