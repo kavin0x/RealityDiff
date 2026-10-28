@@ -44,7 +44,18 @@ CREATE TABLE IF NOT EXISTS commits (
 );
 
 CREATE INDEX IF NOT EXISTS idx_commits_claim ON commits(claim_id, created_at);
+
+CREATE TABLE IF NOT EXISTS compare_runs (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    question TEXT NOT NULL,
+    results_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_compare_runs_created ON compare_runs(created_at DESC);
 """
+
+COMPARE_HISTORY_LIMIT = 40
 
 
 class BeliefStore:
@@ -79,6 +90,19 @@ class BeliefStore:
             self._conn.execute("ALTER TABLE claims ADD COLUMN closed_at TEXT")
         if "outcome_verdict" not in cols:
             self._conn.execute("ALTER TABLE claims ADD COLUMN outcome_verdict TEXT")
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS compare_runs (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                question TEXT NOT NULL,
+                results_json TEXT NOT NULL
+            )
+            """
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_compare_runs_created ON compare_runs(created_at DESC)"
+        )
 
     def create_claim(self, statement: str, *, claim_id: str | None = None) -> ClaimRecord:
         created = utcnow()
@@ -183,6 +207,54 @@ class BeliefStore:
         if not claim or not claim.head:
             return None
         return self.get_commit(claim.head)
+
+    def save_compare_run(self, question: str, results: list[dict]) -> dict[str, str]:
+        created = utcnow()
+        run_id = f"cmp_{sha1_hex(question + created.isoformat())[:12]}"
+        payload = json.dumps(results)
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO compare_runs (id, created_at, question, results_json) VALUES (?, ?, ?, ?)",
+                (run_id, created.isoformat(), question, payload),
+            )
+            kept = self._conn.execute(
+                "SELECT id FROM compare_runs ORDER BY created_at DESC"
+            ).fetchall()
+            extra = kept[COMPARE_HISTORY_LIMIT:]
+            if extra:
+                self._conn.execute(
+                    f"DELETE FROM compare_runs WHERE id IN ({','.join('?' * len(extra))})",
+                    [row["id"] for row in extra],
+                )
+            self._conn.commit()
+        return {"id": run_id, "created_at": created.isoformat()}
+
+    def list_compare_runs(self, *, limit: int = 20) -> list[dict]:
+        limit = max(1, min(COMPARE_HISTORY_LIMIT, int(limit)))
+        rows = self._conn.execute(
+            """
+            SELECT id, created_at, question, results_json
+            FROM compare_runs
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        out: list[dict] = []
+        for row in rows:
+            try:
+                results = json.loads(row["results_json"])
+            except json.JSONDecodeError:
+                results = []
+            out.append(
+                {
+                    "id": row["id"],
+                    "created_at": row["created_at"],
+                    "question": row["question"],
+                    "results": results,
+                }
+            )
+        return out
 
     def delete_claim(self, claim_id: str) -> None:
         with self._lock:

@@ -16,6 +16,8 @@ from realitydiff.models import BlameReport, ClaimDiff, ClaimRecord, Commit, Watc
 from realitydiff.schedule import install as install_service
 from realitydiff.schedule import status as service_status
 from realitydiff.schedule import uninstall as uninstall_service
+from realitydiff.compare import run_compare
+from realitydiff.providers import default_openrouter_model, default_xai_models, provider_key
 from realitydiff.service import RealityDiff
 from realitydiff.watcher import WatchLoop
 from realitydiff.xai import XAIError
@@ -52,6 +54,17 @@ class WatchConfigBody(BaseModel):
     interval_seconds: int | None = Field(default=None, ge=30, le=86_400)
 
 
+class CompareModel(BaseModel):
+    provider: str = Field(min_length=2, max_length=32)
+    model: str = Field(min_length=1, max_length=200)
+
+
+class CompareBody(BaseModel):
+    question: str = Field(min_length=3, max_length=8000)
+    models: list[CompareModel] = Field(min_length=1)
+    timeout_seconds: float | None = Field(default=None, ge=1, le=120)
+
+
 def create_app(
     engine: RealityDiff | None = None,
     *,
@@ -77,6 +90,33 @@ def create_app(
         if not isinstance(detail, str):
             detail = str(detail)
         return JSONResponse(status_code=exc.status_code, content={"detail": detail})
+
+    @app.get("/api/providers")
+    def providers() -> dict:
+        return {
+            "xai": bool(provider_key("xai")),
+            "openrouter": bool(provider_key("openrouter")),
+            "defaults": {
+                "xai": default_xai_models()[0],
+                "openrouter": default_openrouter_model(),
+            },
+        }
+
+    @app.post("/api/compare")
+    async def compare(body: CompareBody) -> dict:
+        try:
+            return await run_compare(
+                body.question,
+                [item.model_dump() for item in body.models],
+                timeout=body.timeout_seconds,
+                store=engine.store,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.get("/api/compare/history")
+    def compare_history(limit: int = Query(default=20, ge=1, le=40)) -> list[dict]:
+        return engine.store.list_compare_runs(limit=limit)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
