@@ -31,21 +31,35 @@ def _print(data) -> None:
         print(json.dumps(data, indent=2, default=str))
 
 
-def _ensure_key() -> bool:
-    """True when an xAI key is available. Offers first-run setup to a person at a terminal."""
-    if os.environ.get("XAI_API_KEY"):
+def _has_provider_key() -> bool:
+    return bool(os.environ.get("XAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))
+
+
+def _ensure_key(*, need_xai: bool = False) -> bool:
+    """True when a required API key is available. Offers first-run setup at a terminal."""
+    if need_xai and os.environ.get("XAI_API_KEY"):
+        return True
+    if not need_xai and _has_provider_key():
         return True
     if needs_first_run():
         print("realitydiff: first run, so let's set up.\n", file=sys.stderr)
         run_setup()
         print()
         load_env()
-        if os.environ.get("XAI_API_KEY"):
+        if need_xai and os.environ.get("XAI_API_KEY"):
             return True
-    print(
-        f"realitydiff: XAI_API_KEY is not set. Run `realitydiff setup`, export it, or save it in {config_file()}",
-        file=sys.stderr,
-    )
+        if not need_xai and _has_provider_key():
+            return True
+    if need_xai:
+        print(
+            f"realitydiff: XAI_API_KEY is not set. Run `realitydiff setup`, export it, or save it in {config_file()}",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"realitydiff: no API key. Set XAI_API_KEY and/or OPENROUTER_API_KEY, run `realitydiff setup`, or save them in {config_file()}",
+            file=sys.stderr,
+        )
     return False
 
 
@@ -56,13 +70,26 @@ def main(argv: list[str] | None = None) -> int:
 
     setup_p = sub.add_parser("setup", help="Guided setup: save your xAI key and check your PATH")
     setup_p.add_argument("-y", "--yes", action="store_true", help="Non-interactive: accept defaults, never prompt")
-    setup_p.add_argument("--no-key", action="store_true", help="Skip the XAI_API_KEY prompt")
+    setup_p.add_argument("--no-key", action="store_true", help="Skip the API key prompts")
 
     open_p = sub.add_parser("open", help="Create a living claim and survey the internet")
     open_p.add_argument("statement")
+    open_p.add_argument("--model", help="xAI model id (overrides XAI_MODEL / the default fallback list)")
+
+    compare_p = sub.add_parser("compare", help="Ask the same question of several models")
+    compare_p.add_argument("question")
+    compare_p.add_argument(
+        "-m",
+        "--model",
+        action="append",
+        dest="models",
+        help="provider:model_id, repeatable (xai:grok-4.3 or openrouter:openai/gpt-4o-mini)",
+    )
+    compare_p.add_argument("--timeout", type=float, default=45.0, help="Per-model timeout in seconds (max 120)")
 
     watch_p = sub.add_parser("watch", help="Search for new evidence and maybe commit")
     watch_p.add_argument("claim_id")
+    watch_p.add_argument("--model", help="xAI model id (overrides XAI_MODEL / the default fallback list)")
 
     sub.add_parser("watch-all", help="Watch every due claim once (used by the installed service)")
 
@@ -110,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "setup":
         return run_setup(assume_yes=args.yes, skip_key=args.no_key)
     if args.cmd == "serve":
-        if not _ensure_key():
+        if not _ensure_key(need_xai=False):
             return 2
         import uvicorn
 
@@ -130,10 +157,42 @@ def main(argv: list[str] | None = None) -> int:
         _print({**status(), "db": _db_path()})
         return 0
 
-    if not _ensure_key():
+    if args.cmd == "compare":
+        if not _ensure_key(need_xai=False):
+            return 2
+        from realitydiff.compare import run_compare
+        from realitydiff.store import BeliefStore
+
+        models = args.models or []
+        if not models:
+            print("realitydiff: pass at least one -m provider:model_id", file=sys.stderr)
+            return 2
+        try:
+            import asyncio
+
+            payload = asyncio.run(
+                run_compare(
+                    args.question,
+                    models,
+                    timeout=args.timeout,
+                    store=BeliefStore(DEFAULT_DB),
+                )
+            )
+        except ValueError as exc:
+            print(f"realitydiff: {exc}", file=sys.stderr)
+            return 2
+        _print(payload)
+        return 0
+
+    if not _ensure_key(need_xai=True):
         return 2
     try:
-        engine = _engine()
+        from realitydiff.providers import default_xai_models
+        from realitydiff.xai import XAIClient
+
+        model_id = getattr(args, "model", None)
+        models = (model_id,) if model_id else default_xai_models()
+        engine = RealityDiff.open(DEFAULT_DB, model=XAIClient(models=models))
     except XAIError as exc:
         print(f"realitydiff: {exc}", file=sys.stderr)
         return 2

@@ -11,6 +11,7 @@ from realitydiff import cli, config, setup
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("REALITYDIFF_CONFIG", str(tmp_path / "cfg" / "env"))
     monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setenv("NO_COLOR", "1")
     return tmp_path
 
@@ -86,9 +87,52 @@ def test_serve_without_key_prints_a_clean_error_not_a_traceback(isolated, monkey
     monkeypatch.setattr(setup, "is_interactive", lambda: False)
     assert cli.main(["serve"]) == 2
     err = capsys.readouterr().err
-    assert "XAI_API_KEY is not set" in err
+    assert "no API key" in err
+    assert "OPENROUTER_API_KEY" in err
     assert "realitydiff setup" in err
     assert "Traceback" not in err
+
+
+def test_openrouter_key_is_optional_and_defaults_to_no(isolated):
+    replies = iter(["n", ""])
+    code, text = run(
+        interactive=True,
+        ask=lambda _p: next(replies),
+        ask_secret=lambda _p: pytest.fail("asked"),
+    )
+    assert code == 0
+    assert "OpenRouter" in text
+    cfg = isolated / "cfg" / "env"
+    assert not cfg.exists() or "OPENROUTER_API_KEY" not in cfg.read_text()
+
+
+def test_openrouter_key_saves_hidden_with_mode_600(isolated):
+    replies = iter(["n", "y"])
+    code, text = run(
+        interactive=True,
+        ask=lambda _p: next(replies),
+        ask_secret=lambda _p: "sk-or-v1-abc_123.DEF",
+    )
+    assert code == 0
+    cfg = isolated / "cfg" / "env"
+    assert "OPENROUTER_API_KEY=sk-or-v1-abc_123.DEF" in cfg.read_text()
+    assert stat.S_IMODE(cfg.stat().st_mode) == 0o600
+    assert "sk-or-v1-abc_123" not in text
+    assert "XAI_API_KEY=" not in cfg.read_text()
+
+
+def test_serve_accepts_openrouter_key_only(isolated, monkeypatch):
+    import uvicorn
+
+    seen = {}
+
+    def fake_run(app, host, port, **kw):
+        seen["host"] = host
+
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    assert cli.main(["serve"]) == 0
+    assert seen["host"] == "127.0.0.1"
 
 
 def test_bare_command_runs_setup_first_time_then_help(isolated, monkeypatch, capsys):

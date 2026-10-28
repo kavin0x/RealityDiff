@@ -10,7 +10,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-ALLOWED_KEYS = ("XAI_API_KEY", "REALITYDIFF_DB")
+ALLOWED_KEYS = (
+    "XAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_MODEL",
+    "XAI_MODEL",
+    "REALITYDIFF_DB",
+)
 
 
 def config_file() -> Path:

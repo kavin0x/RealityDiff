@@ -3,14 +3,21 @@ from realitydiff import config
 
 def test_load_env_reads_allowed_keys_without_overriding(tmp_path, monkeypatch):
     f = tmp_path / "env"
-    f.write_text("# comment\nXAI_API_KEY=from-file\nREALITYDIFF_DB='/tmp/x.sqlite'\nOTHER=nope\n")
+    f.write_text(
+        "# comment\nXAI_API_KEY=from-file\nOPENROUTER_API_KEY=or-from-file\n"
+        "OPENROUTER_MODEL=openai/gpt-4o-mini\nREALITYDIFF_DB='/tmp/x.sqlite'\nOTHER=nope\n"
+    )
     monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
     monkeypatch.setenv("REALITYDIFF_DB", "/already/set.sqlite")
     monkeypatch.delenv("OTHER", raising=False)
     config.load_env(f)
     import os
 
     assert os.environ["XAI_API_KEY"] == "from-file"
+    assert os.environ["OPENROUTER_API_KEY"] == "or-from-file"
+    assert os.environ["OPENROUTER_MODEL"] == "openai/gpt-4o-mini"
     assert os.environ["REALITYDIFF_DB"] == "/already/set.sqlite"
     assert "OTHER" not in os.environ
 

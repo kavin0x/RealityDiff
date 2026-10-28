@@ -59,7 +59,59 @@ def needs_first_run() -> bool:
         return False
     if os.environ.get("XAI_API_KEY") or config_has("XAI_API_KEY"):
         return False
+    if os.environ.get("OPENROUTER_API_KEY") or config_has("OPENROUTER_API_KEY"):
+        return False
     return not setup_marker().exists()
+
+
+def _offer_key(
+    *,
+    env_name: str,
+    config,
+    skip_key: bool,
+    interactive: bool,
+    assume_yes: bool,
+    style: _Style,
+    ask,
+    ask_secret,
+    info,
+    ok,
+    warn,
+    default_save: bool,
+    get_url: str,
+    needed_for: str,
+) -> None:
+    if skip_key:
+        info("skipped (--no-key)")
+        return
+    have_file = config_has(env_name)
+    env_key = os.environ.get(env_name, "")
+    new_key = ""
+    if have_file:
+        ok(f"already saved in {_tilde(config)}")
+        if interactive and _confirm("Replace the saved key?", False, style, assume_yes, interactive, ask):
+            new_key = ask_secret(f"  ? New {env_name} (input hidden): ").strip()
+    elif interactive:
+        if env_key:
+            info(f"{env_name} is set in this shell")
+            if _confirm(
+                f"Save it to {_tilde(config)} so realitydiff always finds it?", False, style, assume_yes, interactive, ask
+            ):
+                new_key = env_key
+        elif _confirm(
+            f"Save an {env_name} now? (get one at {get_url})", default_save, style, assume_yes, interactive, ask
+        ):
+            new_key = ask_secret(f"  ? {env_name} (input hidden): ").strip()
+    else:
+        info(f"not saved (non-interactive). Export {env_name} or run `realitydiff setup`.")
+    if new_key:
+        if valid_secret(new_key):
+            set_config(env_name, new_key, config)
+            ok(f"saved to {_tilde(config)} (permissions 600)")
+        else:
+            warn("that key has unexpected characters (spaces, quotes or newlines?); not saved")
+    elif not have_file and interactive:
+        info(f"skipped. Run `realitydiff setup` any time, or export {env_name} ({needed_for}).")
 
 
 def _confirm(question: str, default: bool, style: _Style, assume_yes: bool, interactive: bool, ask) -> bool:
@@ -121,47 +173,48 @@ def run_setup(
         say("Reality Diff setup")
         say()
 
-    step(1, 3, "Checking the install")
+    step(1, 4, "Checking the install")
     ok(f"realitydiff {__version__} on Python {sys.version_info.major}.{sys.version_info.minor}")
     info(f"data   {_tilde(default_db())}")
     info(f"config {_tilde(config)}")
 
-    step(2, 3, "xAI API key")
-    saved = False
-    if skip_key:
-        info("skipped (--no-key)")
-    else:
-        have_file = config_has("XAI_API_KEY")
-        env_key = os.environ.get("XAI_API_KEY", "")
-        new_key = ""
-        if have_file:
-            ok(f"already saved in {_tilde(config)}")
-            if interactive and _confirm("Replace the saved key?", False, style, assume_yes, interactive, ask):
-                new_key = ask_secret("  ? New XAI_API_KEY (input hidden): ").strip()
-        elif interactive:
-            if env_key:
-                info("XAI_API_KEY is set in this shell")
-                if _confirm(
-                    f"Save it to {_tilde(config)} so realitydiff always finds it?", False, style, assume_yes, interactive, ask
-                ):
-                    new_key = env_key
-            elif _confirm(
-                "Save an XAI_API_KEY now? (get one at https://console.x.ai)", True, style, assume_yes, interactive, ask
-            ):
-                new_key = ask_secret("  ? XAI_API_KEY (input hidden): ").strip()
-        else:
-            info("not saved (non-interactive). Export XAI_API_KEY or run `realitydiff setup`.")
-        if new_key:
-            if valid_secret(new_key):
-                set_config("XAI_API_KEY", new_key, config)
-                ok(f"saved to {_tilde(config)} (permissions 600)")
-                saved = True
-            else:
-                warn("that key has unexpected characters (spaces, quotes or newlines?); not saved")
-        elif not have_file and interactive:
-            info("skipped. Run `realitydiff setup` any time, or export XAI_API_KEY.")
+    step(2, 4, "xAI API key")
+    _offer_key(
+        env_name="XAI_API_KEY",
+        config=config,
+        skip_key=skip_key,
+        interactive=interactive,
+        assume_yes=assume_yes,
+        style=style,
+        ask=ask,
+        ask_secret=ask_secret,
+        info=info,
+        ok=ok,
+        warn=warn,
+        default_save=True,
+        get_url="https://console.x.ai",
+        needed_for="claims and watch",
+    )
 
-    step(3, 3, "PATH")
+    step(3, 4, "OpenRouter API key (optional)")
+    _offer_key(
+        env_name="OPENROUTER_API_KEY",
+        config=config,
+        skip_key=skip_key,
+        interactive=interactive,
+        assume_yes=assume_yes,
+        style=style,
+        ask=ask,
+        ask_secret=ask_secret,
+        info=info,
+        ok=ok,
+        warn=warn,
+        default_save=False,
+        get_url="https://openrouter.ai/keys",
+        needed_for="the compare view",
+    )
+
+    step(4, 4, "PATH")
     bin_dir = _bin_dir()
     on_path = bool(shutil.which("realitydiff"))
     if on_path:

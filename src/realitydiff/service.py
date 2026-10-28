@@ -11,6 +11,7 @@ from realitydiff.diffing import diff_states
 from realitydiff.models import Commit, WatchResult
 from realitydiff.reasoner import Reasoner
 from realitydiff.store import BeliefStore
+from realitydiff.providers import default_xai_models
 from realitydiff.xai import LanguageModel, XAIClient
 
 log = logging.getLogger("realitydiff.service")
@@ -19,7 +20,7 @@ log = logging.getLogger("realitydiff.service")
 class RealityDiff:
     def __init__(self, store: BeliefStore, model: LanguageModel | None = None) -> None:
         self.store = store
-        self.model = model or XAIClient()
+        self.model = model or XAIClient(models=default_xai_models())
         self.reasoner = Reasoner(self.model)
         self._watch_locks: dict[str, threading.Lock] = {}
         self._watch_meta = threading.Lock()

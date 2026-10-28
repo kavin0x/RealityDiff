@@ -143,18 +143,20 @@ class XAIClient:
                             timeout=self.timeout,
                         )
                         if response.status_code == 429:
-                            last_error = XAIError(response.text)
+                            last_error = XAIError(self._safe_error(response.text))
                             time.sleep(2**retry)
                             continue
                         if response.status_code >= 400:
-                            last_error = XAIError(f"{model} HTTP {response.status_code}: {response.text[:500]}")
+                            last_error = XAIError(
+                                self._safe_error(f"{model} HTTP {response.status_code}: {response.text[:500]}")
+                            )
                             break
                         body = response.json()
                         if body.get("error"):
-                            last_error = XAIError(str(body.get("error")))
+                            last_error = XAIError(self._safe_error(str(body.get("error"))))
                             break
                         if body.get("status") == "failed":
-                            last_error = XAIError(str(body.get("incomplete_details") or body))
+                            last_error = XAIError(self._safe_error(str(body.get("incomplete_details") or body)))
                             time.sleep(2**retry)
                             continue
                         text, close_claim, body = self._resolve_tools(
@@ -186,7 +188,12 @@ class XAIClient:
                     except httpx.HTTPError as exc:
                         last_error = exc
                         time.sleep(2**retry)
-        raise XAIError(f"xAI request failed: {last_error}")
+        raise XAIError(self._safe_error(f"xAI request failed: {last_error}"))
+
+    def _safe_error(self, message: str) -> str:
+        from realitydiff.providers import redact_secrets
+
+        return redact_secrets(str(message), self.api_key)
 
     def _resolve_tools(
         self,
