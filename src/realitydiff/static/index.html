@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Reality Diff — Git for beliefs</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/static/styles.css?v=0.4.6" />
+  <link rel="stylesheet" href="/static/styles.css?v=0.4.7" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
 </head>
@@ -15,6 +15,7 @@
     <div class="pane-switch" role="tablist" aria-label="Workspace panes">
       <button type="button" id="show-claims" role="tab">claims</button>
       <button type="button" id="show-stage" role="tab" class="on">belief</button>
+      <button type="button" id="show-compare" role="tab">compare</button>
       <button type="button" id="show-log" role="tab">history</button>
     </div>
     <aside class="rail" id="rail">
@@ -25,6 +26,7 @@
           <p>git for beliefs</p>
         </div>
       </header>
+      <button type="button" class="ghost" id="nav-compare">compare models</button>
       <form id="open-form" class="open-form">
         <label for="claim-input">New claim</label>
         <textarea id="claim-input" rows="3" maxlength="2000" placeholder="Apple is going to replace Siri with an LLM." required></textarea>
@@ -47,6 +49,25 @@
 
     <main class="stage">
       <div id="watch-status" class="watch-status hidden" role="status"></div>
+      <section id="compare-view" class="hidden">
+        <p class="kicker">compare</p>
+        <h2 class="serif">Same question, several models</h2>
+        <p class="hint">Keys stay on the server. Type model ids yourself; I am not going to pretend I know which ones you pay for.</p>
+        <form id="compare-form" class="compare-form">
+          <label for="compare-question">Question</label>
+          <textarea id="compare-question" rows="4" maxlength="8000" placeholder="Will Apple replace Siri with an LLM this year?" required></textarea>
+          <div id="compare-models"></div>
+          <div class="compare-form-actions">
+            <button type="button" class="ghost" id="compare-add">add model</button>
+            <button type="submit" id="compare-run">compare.run()</button>
+          </div>
+        </form>
+        <div id="compare-grid" class="compare-grid"></div>
+        <section class="compare-history">
+          <h3>Recent runs</h3>
+          <ol id="compare-history"></ol>
+        </section>
+      </section>
       <div id="empty" class="empty">
         <p class="kicker">living claims</p>
         <p class="serif">Give it a claim.</p>
@@ -170,6 +191,6 @@
     </div>
   </div>
   <div id="toast" class="toast hidden"></div>
-  <script src="/static/app.js?v=0.4.6"></script>
+  <script src="/static/app.js?v=0.4.7"></script>
 </body>
 </html>

@@ -96,6 +96,12 @@ def test_ui_keeps_terminal_style_but_is_sparse(tmp_path):
         assert ".weight" in css
         assert "position: fixed" in css
         assert "prefers-reduced-motion" in css
+        assert 'id="compare-view"' in html
+        assert 'id="compare-grid"' in html
+        assert "compare.run()" in html
+        assert "renderCompareResults" in js
+        assert "/api/compare" in js
+        assert ".compare-grid" in css
 
 
 def test_outcome_summary_strips_urls_and_source_label():

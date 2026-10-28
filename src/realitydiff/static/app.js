@@ -85,9 +85,10 @@ function setWatchStatus(text) {
 
 function parseRoute() {
   const raw = location.hash.replace(/^#/, "");
-  if (!raw) return { id: null, sha: null };
+  if (!raw) return { id: null, sha: null, compare: false };
+  if (raw === "compare") return { id: null, sha: null, compare: true };
   const [id, sha] = raw.split("/");
-  return { id: id || null, sha: sha || null };
+  return { id: id || null, sha: sha || null, compare: false };
 }
 
 function setRoute(id, sha) {
@@ -159,7 +160,7 @@ function renderSpark(el, values) {
 async function refreshList() {
   claimsCache = await api("/api/claims", { timeoutMs: 15000 });
   renderClaimList();
-  if (!currentId && !parseRoute().id && claimsCache[0]) selectClaim(claimsCache[0].id);
+  if (!currentId && !parseRoute().id && !parseRoute().compare && claimsCache[0]) selectClaim(claimsCache[0].id);
 }
 
 function matchesClaim(claim, query, status) {
@@ -233,6 +234,7 @@ function renderClaimList() {
 }
 
 async function selectClaim(id, sha) {
+  showCompare(false);
   currentId = id;
   browseSha = sha || null;
   if (location.hash.replace(/^#/, "") !== (sha ? `${id}/${sha}` : id)) {
@@ -758,17 +760,169 @@ document.querySelectorAll("#status-filter [data-status]").forEach((btn) => {
   });
 });
 
+function showCompare(on) {
+  $("compare-view").classList.toggle("hidden", !on);
+  $("empty").classList.toggle("hidden", on || Boolean(currentId));
+  $("claim-view").classList.toggle("hidden", on || !currentId);
+}
+
+function defaultCompareModels() {
+  return [
+    { provider: "xai", model: "grok-4.3" },
+    { provider: "openrouter", model: "openai/gpt-4o-mini" },
+  ];
+}
+
+function addCompareRow(pair) {
+  const wrap = $("compare-models");
+  const row = document.createElement("div");
+  row.className = "compare-row";
+  const provider = pair?.provider || "xai";
+  const model = pair?.model || "";
+  row.innerHTML = `
+    <select aria-label="provider">
+      <option value="xai"${provider === "xai" ? " selected" : ""}>xAI</option>
+      <option value="openrouter"${provider === "openrouter" ? " selected" : ""}>OpenRouter</option>
+    </select>
+    <input type="text" aria-label="model id" placeholder="model id" value="${escapeAttr(model)}" />
+    <button type="button" class="ghost compare-remove">remove</button>`;
+  row.querySelector(".compare-remove").onclick = () => {
+    if (wrap.children.length > 1) row.remove();
+  };
+  wrap.appendChild(row);
+}
+
+function readCompareModels() {
+  return [...$("compare-models").querySelectorAll(".compare-row")].map((row) => ({
+    provider: row.querySelector("select").value,
+    model: row.querySelector("input").value.trim(),
+  })).filter((item) => item.model);
+}
+
+function renderCompareResults(results) {
+  const grid = $("compare-grid");
+  grid.innerHTML = "";
+  (results || []).forEach((item) => {
+    const card = document.createElement("article");
+    card.className = `compare-card ${item.status || "pending"}`;
+    const usage = [];
+    if (item.latency_ms != null) usage.push(`${item.latency_ms} ms`);
+    if (item.total_tokens != null) usage.push(`${item.total_tokens} tokens`);
+    else {
+      if (item.prompt_tokens != null) usage.push(`in ${item.prompt_tokens}`);
+      if (item.completion_tokens != null) usage.push(`out ${item.completion_tokens}`);
+    }
+    if (item.cost != null) usage.push(`cost ${item.cost}`);
+    const body = item.status === "error"
+      ? escapeHtml(item.error || "failed")
+      : item.status === "pending"
+        ? "waiting…"
+        : escapeHtml(item.answer || "");
+    card.innerHTML = `<h3>${escapeHtml(item.provider)} / ${escapeHtml(item.model)}</h3>
+      <p class="compare-meta">${escapeHtml(item.status || "pending")}${usage.length ? " · " + escapeHtml(usage.join(" · ")) : ""}</p>
+      <p class="answer">${body}</p>`;
+    grid.appendChild(card);
+  });
+}
+
+function renderCompareHistory(rows) {
+  const ol = $("compare-history");
+  ol.innerHTML = "";
+  if (!rows?.length) {
+    const li = document.createElement("li");
+    li.textContent = "No compare runs yet.";
+    ol.appendChild(li);
+    return;
+  }
+  rows.forEach((run) => {
+    const li = document.createElement("li");
+    const n = (run.results || []).length;
+    li.innerHTML = `<div>${escapeHtml(run.question)}</div><div class="status">${escapeHtml(relativeTime(run.created_at))} · ${n} model${n === 1 ? "" : "s"}</div>`;
+    li.onclick = () => {
+      $("compare-question").value = run.question;
+      renderCompareResults(run.results || []);
+    };
+    ol.appendChild(li);
+  });
+}
+
+async function loadCompareHistory() {
+  try {
+    const rows = await api("/api/compare/history", { timeoutMs: 15000 });
+    renderCompareHistory(rows);
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+async function openCompare() {
+  showCompare(true);
+  location.hash = "compare";
+  showPane("compare");
+  if (!$("compare-models").children.length) {
+    defaultCompareModels().forEach(addCompareRow);
+    try {
+      const info = await api("/api/providers", { timeoutMs: 8000 });
+      const first = $("compare-models").querySelector(".compare-row input");
+      const second = $("compare-models").querySelectorAll(".compare-row input")[1];
+      if (first && info?.defaults?.xai) first.value = info.defaults.xai;
+      if (second && info?.defaults?.openrouter) second.value = info.defaults.openrouter;
+    } catch {
+      /* defaults already filled */
+    }
+  }
+  await loadCompareHistory();
+}
+
 function showPane(which) {
   const app = $("app");
   app.classList.toggle("show-rail", which === "claims");
   app.classList.toggle("show-log", which === "history");
+  if (which === "compare") showCompare(true);
+  else if (which === "belief" || which === "claims" || which === "history") {
+    if (location.hash.replace(/^#/, "") === "compare") showCompare(false);
+  }
+  const id = which === "claims" ? "show-claims" : which === "history" ? "show-log" : which === "compare" ? "show-compare" : "show-stage";
   document.querySelectorAll(".pane-switch button").forEach((btn) => {
-    btn.classList.toggle("on", btn.id === `show-${which === "claims" ? "claims" : which === "history" ? "log" : "stage"}`);
+    btn.classList.toggle("on", btn.id === id);
   });
 }
 $("show-claims").onclick = () => showPane("claims");
-$("show-stage").onclick = () => showPane("belief");
+$("show-stage").onclick = () => {
+  showCompare(false);
+  showPane("belief");
+  if (currentId) location.hash = currentId;
+  else if (location.hash.replace(/^#/, "") === "compare") location.hash = "";
+};
+$("show-compare").onclick = () => openCompare();
+$("nav-compare").onclick = () => openCompare();
 $("show-log").onclick = () => showPane("history");
+$("compare-add").onclick = () => addCompareRow({ provider: "openrouter", model: "" });
+$("compare-form").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const question = $("compare-question").value.trim();
+  const models = readCompareModels();
+  if (!question || !models.length) {
+    toast("Need a question and at least one model id.");
+    return;
+  }
+  renderCompareResults(models.map((item) => ({ ...item, status: "pending" })));
+  const btn = $("compare-run");
+  setBusy(btn, true);
+  try {
+    const payload = await api("/api/compare", {
+      method: "POST",
+      timeoutMs: 180000,
+      body: JSON.stringify({ question, models }),
+    });
+    renderCompareResults(payload.results || []);
+    await loadCompareHistory();
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    setBusy(btn, false);
+  }
+};
 
 document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape") {
@@ -795,7 +949,11 @@ document.addEventListener("keydown", (ev) => {
 });
 
 window.addEventListener("hashchange", () => {
-  const { id, sha } = parseRoute();
+  const { id, sha, compare } = parseRoute();
+  if (compare) {
+    openCompare().catch((err) => toast(err.message));
+    return;
+  }
   if (id && (id !== currentId || sha !== browseSha)) selectClaim(id, sha).catch((err) => toast(err.message));
 });
 
@@ -808,7 +966,8 @@ api("/api/service", { timeoutMs: 8000 }).then((status) => {
 
 refreshList()
   .then(() => {
-    const { id, sha } = parseRoute();
+    const { id, sha, compare } = parseRoute();
+    if (compare) return openCompare();
     if (id) return selectClaim(id, sha);
   })
   .catch((err) => toast(err.message));
