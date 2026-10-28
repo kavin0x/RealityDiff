@@ -1,6 +1,6 @@
 # Reality Diff
 
-Git for beliefs — a version history of a claim: evidence, confidence, and why that number moved. For people tracking a story that is still unfolding (products, policy, markets) who want a trail, not a vibe.
+Git for beliefs: a version history of a claim (evidence, confidence, and why that number moved). For people tracking a story that is still unfolding (products, policy, markets) who want a trail, not a vibe. This is alpha. Claims still depend on xAI search; compare is a thin side-by-side, not a second reasoner.
 
 ## Why I built this
 
@@ -31,7 +31,8 @@ News feeds overwrite your memory. Last week’s confidence on a rumor disappears
 
 **Surfaces**
 
-- Local web UI (`realitydiff serve` → <http://localhost:8000>)
+- Local web UI (`realitydiff serve` → <http://127.0.0.1:8000>)
+- Compare view: one question, several models, side by side (xAI and/or OpenRouter)
 - CLI for agents and scripts
 - REST API for the same actions
 
@@ -46,7 +47,7 @@ realitydiff                     # first run walks you through setup
 
 Plain `pip install realitydiff` works inside a virtualenv. On macOS and many Linux setups, system-wide `pip` refuses with an "externally-managed-environment" error, which is why I lead with `uv`/`pipx`.
 
-The first time you run `realitydiff` in a terminal (or any time you run `realitydiff setup`), it does what the old installer did: checks the install, offers to save your `XAI_API_KEY` to `~/.config/realitydiff/env` (permissions 600, typing is hidden), and tells you if the command isn't on your PATH. `realitydiff setup --yes` never prompts, and `--no-key` skips the key.
+The first time you run `realitydiff` in a terminal (or any time you run `realitydiff setup`), it checks the install, offers to save your `XAI_API_KEY` to `~/.config/realitydiff/env` (permissions 600, typing is hidden), optionally offers an `OPENROUTER_API_KEY` the same way (default no), and tells you if the command isn't on your PATH. `realitydiff setup --yes` never prompts, and `--no-key` skips both keys.
 
 Prefer a script that also installs `uv` for you (macOS or Linux, no sudo)?
 
@@ -73,17 +74,23 @@ The installed CLI keeps claims in `~/.local/share/realitydiff/` (set `REALITYDIF
 ## Try it (from a checkout)
 
 ```bash
-export XAI_API_KEY=...
+export XAI_API_KEY=...                 # claims / watch (xAI Responses API)
+export OPENROUTER_API_KEY=...          # optional; compare via OpenRouter
+# or put the same keys in ~/.config/realitydiff/env (mode 600)
+# optional: XAI_MODEL=grok-4.3  OPENROUTER_MODEL=openai/gpt-4o-mini
 uv sync --extra dev
-uv run realitydiff serve
-# open http://localhost:8000
+uv run realitydiff serve               # 127.0.0.1:8000
+# open http://127.0.0.1:8000 then click "compare models"
 ```
 
 ```bash
 uv run realitydiff open "Apple is going to replace Siri with an LLM."
+uv run realitydiff open --model grok-4.3 "..."
 uv run realitydiff watch <claim_id>
 uv run realitydiff log <claim_id>
 uv run realitydiff diff <claim_id> <sha_a> <sha_b>
+uv run realitydiff compare "Will Apple replace Siri this year?" \
+  -m xai:grok-4.3 -m openrouter:openai/gpt-4o-mini
 ```
 
 ```bash
@@ -93,7 +100,7 @@ uv run pytest
 
 ## Stack
 
-Python 3.11+ · uv · local web UI + REST · xAI Responses API (web + X search) · MIT
+Python 3.11+ · uv · local web UI + REST · xAI Responses API (web + X search) · OpenRouter chat completions (optional, compare only) · MIT
 
 ## License
 
