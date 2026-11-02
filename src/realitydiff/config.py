@@ -33,8 +33,19 @@ def config_file() -> Path:
 
 
 def load_env(path: Path | None = None) -> None:
-    """Read KEY=VALUE lines into os.environ without overriding existing values."""
-    path = path or config_file()
+    """Read KEY=VALUE lines into os.environ without overriding existing values.
+
+    With no path, read the user config file and then a checkout ``.env``.
+    A path loads that file only.
+    """
+    if path is None:
+        _load_env_file(config_file())
+        _load_env_file(Path.cwd() / ".env")
+        return
+    _load_env_file(path)
+
+
+def _load_env_file(path: Path) -> None:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:

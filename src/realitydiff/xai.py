@@ -103,6 +103,7 @@ class XAIClient:
         self.models = models
         self.timeout = timeout
         self.last_model: str | None = None
+        self.active_model: str | None = None
 
     def complete(
         self,
@@ -119,6 +120,7 @@ class XAIClient:
         sticky = conv_id or cache_key or "realitydiff"
         attempts = _request_plans(previous_response_id=previous_response_id, compaction=compaction)
         for model in self.models:
+            self.active_model = model
             for plan in attempts:
                 for retry in range(3):
                     try:

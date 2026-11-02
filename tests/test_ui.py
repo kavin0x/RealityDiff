@@ -57,7 +57,13 @@ def test_ui_keeps_terminal_style_but_is_sparse(tmp_path):
         assert 'id="conf-label"' in html
         assert "/static/app.js?v=" in html
         assert "live watch" in html
-        assert 'id="watch-interval"' in html
+        assert 'id="watch-cadence"' in html
+        assert "Full update every 5m." in html
+        assert 'id="watch-permit"' in html
+        assert "Allow" in html
+        assert 'id="watch-interval"' not in html
+        assert "Checking sources every" in js
+        assert "Allow live watch" in js
 
         assert "renderClosedState" in js
         assert "isClosedClaim" in js
@@ -83,8 +89,8 @@ def test_ui_keeps_terminal_style_but_is_sparse(tmp_path):
         assert "Math.max(220, rail)" in js
         assert "Math.max(260, log)" in js
         assert "clampPane" in js
-        assert "formatInterval" in js
-        assert "syncIntervalSelect" in js
+        assert "formatShort" in js
+        assert "cadenceLine" in js
         assert "pointerdown" in js
         assert "aria-busy" in js
         assert "touch-action: none" in css
@@ -99,6 +105,8 @@ def test_ui_keeps_terminal_style_but_is_sparse(tmp_path):
         assert "collectCitations" not in js
         assert 'id="citations"' not in html
         assert 'id="confidence-card"' in html
+        assert "score-ledger" not in html
+        assert "renderScoreLedger" not in js
         assert 'id="inspector-backdrop"' in html
         assert 'id="keys"' in html
         assert "matchesClaim" in js
@@ -115,6 +123,25 @@ def test_ui_keeps_terminal_style_but_is_sparse(tmp_path):
         assert "renderCompareResults" in js
         assert "/api/compare" in js
         assert ".compare-grid" in css
+        assert "claim-identity" in html
+        assert ".claim-identity" in css
+        assert "position: sticky" in css
+        assert "conf-ring" not in html
+        assert "setConfidenceRing" not in js
+        assert 'id="home-list"' in html
+        assert 'id="home-logo"' in html
+        assert 'id="agent-status"' in html
+        assert 'id="agent-kicker"' in html
+        assert 'id="agent-detail"' in html
+        assert "/api/activity" in js
+        assert "function renderAgentStatus" in js
+        assert "function pollActivity" in js
+        assert "function agentStatusView" in js
+        assert ".agent-status" in css
+        assert ".agent-status.is-live" in css
+        assert "agent-led" in css
+        assert "function renderHome" in js
+        assert "claimsCache[0]) selectClaim" not in js
 
 
 def test_outcome_summary_strips_urls_and_source_label():
@@ -147,18 +174,40 @@ if (weightPercent(0.6) !== 60) throw new Error("weight");
 if (weightPercent(2) !== 100) throw new Error("clamp");
 if (weightPercent("nope") !== 0) throw new Error("nan");
 const clampFn = src.match(/function clampPane\\([\\s\\S]*?\\n\\}}/);
-const intervalFn = src.match(/function formatInterval\\([\\s\\S]*?\\n\\}}/);
-if (!clampFn || !intervalFn) throw new Error("missing pane helpers");
+const shortFn = src.match(/function formatShort\\([\\s\\S]*?\\n\\}}/);
+if (!clampFn || !shortFn) throw new Error("missing pane helpers");
 const clampPane = new Function(clampFn[0] + "; return clampPane;")();
-const formatInterval = new Function(intervalFn[0] + "; return formatInterval;")();
+const formatShort = new Function(shortFn[0] + "; return formatShort;")();
 if (clampPane("rail", 100, 1600, 360) !== 220) throw new Error("rail floor");
 if (clampPane("rail", 900, 1600, 360) !== 480) throw new Error("rail cap");
 if (clampPane("log", 900, 1600, 300) !== 560) throw new Error("log cap");
 if (clampPane("rail", 400, 1200, 560) !== 220) throw new Error("stage room");
-if (formatInterval(90) !== "90s") throw new Error("seconds");
-if (formatInterval(120) !== "2m") throw new Error("minutes");
-if (formatInterval(7200) !== "2h") throw new Error("hours");
-if (formatInterval(172800) !== "2d") throw new Error("days");
+if (formatShort(90) !== "90s") throw new Error("seconds");
+if (formatShort(120) !== "2m") throw new Error("minutes");
+if (formatShort(7200) !== "2h") throw new Error("hours");
+if (formatShort(172800) !== "2d") throw new Error("days");
+const elapsedFn = src.match(/function formatElapsed\\([\\s\\S]*?\\n\\}}/);
+const routeFn = src.match(/function routeBits\\([\\s\\S]*?\\n\\}}/);
+const viewFn = src.match(/function agentStatusView\\([\\s\\S]*?\\n\\}}/);
+if (!elapsedFn || !routeFn || !viewFn) throw new Error("missing status helpers");
+const formatElapsed = new Function(elapsedFn[0] + "; return formatElapsed;")();
+const agentStatusView = new Function(elapsedFn[0] + "\\n" + routeFn[0] + "\\n" + viewFn[0] + "; return agentStatusView;")();
+if (formatElapsed(14) !== "14s") throw new Error("elapsed s");
+if (formatElapsed(65) !== "1m 05s") throw new Error("elapsed m");
+const idle = agentStatusView([], null, 1_000_000);
+if (idle.state !== "idle" || idle.detail !== "No research running") throw new Error("idle");
+const live = agentStatusView([{{
+  claim_id: "cl_1", kind: "watch", phase: "Searching the web and X to update confidence",
+  title: "Apple replaces Siri", started_at: 990,
+}}], null, 1_014_000, {{ api: "api.x.ai", model: "grok-4.7" }});
+if (live.state !== "live" || live.kicker !== "researching") throw new Error("live " + live.kicker);
+if (!live.detail.includes("Siri")) throw new Error("title");
+if (!live.meta.includes("Searching")) throw new Error("phase");
+if (!live.meta.includes("api.x.ai") || !live.meta.includes("grok-4.7")) throw new Error("route " + live.meta);
+const wired = agentStatusView([], null, 1_000_000, {{ api: "api.x.ai", model: "grok-4.7" }});
+if (wired.state !== "idle" || !wired.meta.includes("grok-4.7")) throw new Error("idle route");
+const done = agentStatusView([], {{ until: 2_000_000, claimId: "cl_1", title: "Apple replaces Siri", confidence: 78 }}, 1_500_000);
+if (done.state !== "done" || done.meta !== "78.0%") throw new Error("done " + done.meta);
 """
     result = subprocess.run(["bun", "-e", script], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stdout + result.stderr

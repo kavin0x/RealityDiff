@@ -32,6 +32,8 @@ INIT = """```json
       "statement": "Multiple reports describe a Siri LLM overhaul",
       "source_url": "https://example.com/bloomberg",
       "source_title": "Bloomberg",
+      "kind": "reputable_report",
+      "entity": "bloomberg",
       "weight": 0.6,
       "notes": "Secondary reporting"
     }
@@ -41,6 +43,8 @@ INIT = """```json
       "statement": "Current Siri still behaves like the classical product",
       "source_url": "https://example.com/ios",
       "source_title": "iOS",
+      "kind": "rumor_against",
+      "entity": "apple",
       "weight": 0.5,
       "notes": "Shipping software contradicts a completed replacement"
     }
@@ -77,6 +81,8 @@ WATCH_HIT = """```json
       "statement": "Multiple reports describe a Siri LLM overhaul",
       "source_url": "https://example.com/bloomberg",
       "source_title": "Bloomberg",
+      "kind": "reputable_report",
+      "entity": "bloomberg",
       "weight": 0.6,
       "notes": "Secondary reporting"
     },
@@ -84,6 +90,8 @@ WATCH_HIT = """```json
       "statement": "Apple documentation describes a foundation-model Siri runtime replacing the dialog manager",
       "source_url": "https://developer.apple.com/documentation/siri/foundation-model",
       "source_title": "Apple Developer",
+      "kind": "primary_support",
+      "entity": "apple",
       "weight": 0.9,
       "notes": "Primary source"
     }
@@ -93,6 +101,8 @@ WATCH_HIT = """```json
       "statement": "Current Siri still behaves like the classical product",
       "source_url": "https://example.com/ios",
       "source_title": "iOS",
+      "kind": "rumor_against",
+      "entity": "apple",
       "weight": 0.4,
       "notes": "Still true for the shipping build, weaker against the roadmap"
     }
@@ -148,7 +158,10 @@ def test_reasoner_initialize_and_watch_noop():
     model = ScriptedModel([INIT, WATCH_NOOP])
     reasoner = Reasoner(model)
     state, reason, _meta = reasoner.initialize("Apple is going to replace Siri with an LLM.")
-    assert state.confidence == 62
+    assert state.confidence == 56
+    assert state.score is not None
+    assert state.score.confidence == 56
+    assert state.evidence_for[0].kind == "reputable_report"
     assert "rewrite" in reason.lower() or "official" in reason.lower()
     updated, detail, changed, _meta = reasoner.update("Apple is going to replace Siri with an LLM.", state)
     assert changed is False
@@ -161,11 +174,11 @@ def test_engine_watch_commits_on_new_docs(tmp_path):
     model = ScriptedModel([INIT, WATCH_HIT])
     engine = RealityDiff(BeliefStore(tmp_path / "db.sqlite"), model=model)
     living, first = engine.open_claim("Apple is going to replace Siri with an LLM.")
-    assert first.new_confidence == 62
+    assert first.new_confidence == 56
     result = engine.watch(living.id)
     assert result.changed is True
     assert result.commit is not None
-    assert result.commit.new_confidence == 78
+    assert result.commit.new_confidence == 72
     assert result.diff is not None
     assert result.diff.confidence_delta == 16
     assert "documentation" in result.detail.lower()

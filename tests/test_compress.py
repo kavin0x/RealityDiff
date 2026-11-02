@@ -8,6 +8,8 @@ def test_cosmetic_rewrite_is_not_material():
     after = before.model_copy(update={"summary": "Same facts, prettier prose."})
     assert is_material_change(before, after) is False
     assert compact_belief(before)["confidence"] == 62
+    assert compact_belief(before)["score"] is None
+    assert compact_belief(before)["evidence_for"][0]["kind"] == ""
 
 
 def test_compact_belief_omits_citations():

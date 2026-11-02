@@ -6,6 +6,16 @@ let lastLog = [];
 let claimsCache = [];
 let overlayTimer = null;
 let watchingClaims = new Set();
+let serverJobs = [];
+let localJobs = new Map();
+let settle = null;
+let activityClock = null;
+let pollingActivity = false;
+let runningClaimIds = new Set();
+let routeStatus = { model: "", api: "" };
+let watchSync = false;
+let shownHead = null;
+let cadence = { fast_seconds: null, slow_seconds: 300, service_seconds: 30 };
 let listStatus = localStorage.getItem("rd-list-status") || "all";
 
 function errorMessage(data, fallback) {
@@ -93,15 +103,132 @@ function hideOverlay() {
   $("overlay").classList.add("hidden");
 }
 
-function setWatchStatus(text) {
-  const el = $("watch-status");
-  if (!text) {
-    el.classList.add("hidden");
-    el.textContent = "";
-    return;
+function formatElapsed(seconds) {
+  const s = Math.max(0, Math.round(Number(seconds) || 0));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  return `${m}m ${String(s % 60).padStart(2, "0")}s`;
+}
+
+function routeBits(route, job) {
+  const api = (job && job.api) || (route && route.api) || "";
+  const model = (job && job.model) || (route && route.model) || "";
+  return [api, model].filter(Boolean);
+}
+
+function agentStatusView(jobs, settleState, now, route) {
+  const live = jobs || [];
+  if (live.length) {
+    const primary = live[0];
+    const elapsed = Math.max(0, now / 1000 - Number(primary.started_at || now / 1000));
+    const extra = live.length - 1;
+    const bits = [primary.phase, ...routeBits(route, primary), formatElapsed(elapsed)];
+    if (extra) bits.push(`+${extra}`);
+    return {
+      state: "live",
+      claimId: primary.claim_id || "",
+      kicker: primary.kind === "open" ? "opening" : "researching",
+      detail: primary.title || "A claim",
+      meta: bits.filter(Boolean).join(" · "),
+    };
   }
-  el.classList.remove("hidden");
-  el.textContent = text;
+  const wired = routeBits(route);
+  if (settleState && now < settleState.until) {
+    const conf = settleState.confidence == null || Number.isNaN(Number(settleState.confidence))
+      ? ""
+      : `${Number(settleState.confidence).toFixed(1)}%`;
+    return {
+      state: "done",
+      claimId: settleState.claimId || "",
+      kicker: "updated",
+      detail: settleState.title || "Research finished",
+      meta: [conf, ...wired].filter(Boolean).join(" · "),
+    };
+  }
+  return {
+    state: "idle",
+    claimId: "",
+    kicker: "idle",
+    detail: "No research running",
+    meta: wired.join(" · "),
+  };
+}
+
+function mergeJobs() {
+  const byId = new Map();
+  for (const job of serverJobs) byId.set(job.claim_id, job);
+  for (const [id, job] of localJobs) {
+    if (!byId.has(id)) byId.set(id, job);
+  }
+  return [...byId.values()];
+}
+
+function renderAgentStatus(jobs) {
+  const view = agentStatusView(jobs, settle, Date.now(), routeStatus);
+  const bar = $("agent-status");
+  bar.dataset.state = view.state;
+  bar.classList.toggle("is-live", view.state === "live");
+  bar.classList.toggle("is-done", view.state === "done");
+  bar.dataset.claimId = view.claimId;
+  $("agent-kicker").textContent = view.kicker;
+  $("agent-detail").textContent = view.detail;
+  $("agent-meta").textContent = view.meta;
+  const next = new Set((jobs || []).map((job) => job.claim_id).filter((id) => id && !String(id).startsWith("local-")));
+  const changed = next.size !== runningClaimIds.size || [...next].some((id) => !runningClaimIds.has(id));
+  runningClaimIds = next;
+  if (changed && claimsCache.length) renderClaimList();
+}
+
+function startActivityClock() {
+  if (activityClock) return;
+  activityClock = setInterval(() => {
+    const jobs = mergeJobs();
+    if (!jobs.length && settle && Date.now() >= settle.until) settle = null;
+    if (jobs.length || settle) renderAgentStatus(jobs);
+  }, 1000);
+}
+
+async function pollActivity() {
+  if (pollingActivity) return;
+  pollingActivity = true;
+  try {
+    const data = await api("/api/activity", { timeoutMs: 8000 });
+    routeStatus = { model: data.model || "", api: data.api || "" };
+    const jobs = data.jobs || [];
+    const seen = new Set(jobs.map((job) => job.claim_id));
+    if (jobs.some((job) => job.kind === "open")) {
+      for (const [id, job] of [...localJobs]) {
+        if (job.local && job.kind === "open") localJobs.delete(id);
+      }
+    }
+    for (const id of [...localJobs.keys()]) {
+      if (seen.has(id)) localJobs.delete(id);
+    }
+    const previous = new Set([
+      ...serverJobs.map((job) => job.claim_id),
+      ...[...localJobs.keys()],
+    ]);
+    serverJobs = jobs;
+    const running = mergeJobs();
+    const runningIds = new Set(running.map((job) => job.claim_id));
+    const finished = [...previous].filter((id) => id && !runningIds.has(id) && !String(id).startsWith("local-"));
+    if (finished.length) {
+      await refreshList();
+      const claim = claimsCache.find((item) => item.id === finished[0]);
+      settle = {
+        until: Date.now() + 5000,
+        claimId: finished[0],
+        title: claim?.title || "Research finished",
+        confidence: claim?.confidence ?? null,
+      };
+      if (currentId === finished[0] && !browseSha) await selectClaim(finished[0]);
+    }
+    renderAgentStatus(running);
+  } catch {
+    /* next tick retries */
+  } finally {
+    pollingActivity = false;
+  }
 }
 
 function parseRoute() {
@@ -181,7 +308,57 @@ function renderSpark(el, values) {
 async function refreshList() {
   claimsCache = await api("/api/claims", { timeoutMs: 15000 });
   renderClaimList();
-  if (!currentId && !parseRoute().id && !parseRoute().compare && claimsCache[0]) selectClaim(claimsCache[0].id);
+}
+
+function renderHome() {
+  const logo = $("home-logo");
+  const board = $("home-board");
+  const list = $("home-list");
+  const empty = $("empty");
+  if (!logo || !board || !list) return;
+  const has = claimsCache.length > 0;
+  logo.classList.toggle("hidden", has);
+  board.classList.toggle("hidden", !has);
+  if (empty) empty.classList.toggle("is-logo", !has);
+  list.innerHTML = "";
+  if (!has) return;
+  claimsCache.forEach((c) => {
+    const li = document.createElement("li");
+    li.tabIndex = 0;
+    const conf = c.confidence == null ? null : Number(c.confidence);
+    const label = c.closed
+      ? "closed · " + (c.outcome_verdict || "")
+      : (conf == null ? "—" : conf.toFixed(1) + "%");
+    const summary = (c.summary || "").trim();
+    li.innerHTML = `<div class="home-row">
+        <div class="claim-title">${escapeHtml(c.title)}</div>
+        <div class="home-conf">${escapeHtml(label)}</div>
+      </div>
+      <div class="claim-meta"><span class="meter" aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, conf || 0))}%"></span></span>
+        <span>${c.commit_count} commits</span>
+        ${c.last_watched_at ? `<span>watched ${escapeHtml(relativeTime(c.last_watched_at))}</span>` : ""}
+      </div>
+      ${summary ? `<p class="home-summary">${escapeHtml(summary)}</p>` : ""}`;
+    const open = () => {
+      selectClaim(c.id);
+      focusStageOnNarrow();
+    };
+    li.onclick = open;
+    li.onkeydown = (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        open();
+      }
+    };
+    list.appendChild(li);
+  });
+}
+
+function showHome() {
+  currentId = null;
+  browseSha = null;
+  showCompare(false);
+  renderClaimList();
 }
 
 function matchesClaim(claim, query, status) {
@@ -217,6 +394,7 @@ function renderClaimList() {
     li.className = "empty-item";
     li.textContent = claimsCache.length ? "No claims match." : "No claims yet.";
     ul.appendChild(li);
+    renderHome();
     return;
   }
   rows.forEach((c) => {
@@ -224,14 +402,15 @@ function renderClaimList() {
     li.tabIndex = 0;
     li.dataset.id = c.id;
     if (c.id === currentId) li.classList.add("active");
+    if (runningClaimIds.has(c.id)) li.classList.add("researching");
     if (c.closed) li.classList.add("closed");
     if (c.outcome_verdict) li.classList.add(c.outcome_verdict);
     const conf = c.confidence == null ? 0 : Number(c.confidence);
     const label = c.closed ? "closed · " + escapeHtml(c.outcome_verdict || "") : (c.confidence == null ? "—" : conf.toFixed(1) + "%");
     const watched = c.last_watched_at ? ` · watched ${escapeHtml(relativeTime(c.last_watched_at))}` : "";
-    li.innerHTML = `<div>${escapeHtml(c.title)}</div>
+    li.innerHTML = `<div class="claim-title">${escapeHtml(c.title)}</div>
       <div class="claim-meta"><span class="meter" aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, conf))}%"></span></span>
-      <span>${label}</span>
+      <span class="claim-conf">${label}</span>
       <span>${c.commit_count} commits${watched}</span></div>`;
     const open = () => {
       selectClaim(c.id);
@@ -246,6 +425,7 @@ function renderClaimList() {
     };
     ul.appendChild(li);
   });
+  renderHome();
 }
 
 async function selectClaim(id, sha) {
@@ -295,7 +475,8 @@ async function selectClaim(id, sha) {
     browsing,
   });
   $("dirty-chip").classList.toggle("hidden", browsing || !data.dirty);
-  syncIntervalSelect(data.claim.watch_interval_seconds || 300);
+  shownHead = head?.id || null;
+  hideWatchPermit();
   fillList($("ev-for"), state?.evidence_for || [], evidenceItem, $("count-for"));
   fillList($("ev-against"), state?.evidence_against || [], evidenceItem, $("count-against"));
   fillList($("unknowns"), state?.unknowns || [], (u) => {
@@ -368,11 +549,11 @@ function renderClosedState({ closed, verdict, outcome, watching, browsing }) {
   if (watchBtn) watchBtn.disabled = closed || browsing;
   const toggle = $("watching-toggle");
   if (toggle) {
+    watchSync = true;
     toggle.checked = Boolean(watching);
     toggle.disabled = closed || browsing;
+    watchSync = false;
   }
-  const interval = $("watch-interval");
-  if (interval) interval.disabled = closed || browsing;
   renderOutcome(outcome, closed);
 }
 
@@ -481,7 +662,14 @@ function renderLog(log, activeSha) {
 
 function snip(value) {
   if (value == null) return "";
-  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  let shown = value;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    shown = { ...value };
+    delete shown.kind;
+    delete shown.entity;
+    delete shown.score;
+  }
+  const text = typeof shown === "string" ? shown : JSON.stringify(shown, null, 2);
   return escapeHtml(text.slice(0, 500)) + (text.length > 500 ? "…" : "");
 }
 
@@ -547,13 +735,46 @@ async function moveClaim(delta) {
   document.querySelector(`#claim-list li[data-id="${CSS.escape(next.id)}"]`)?.scrollIntoView({ block: "nearest" });
 }
 
-function formatInterval(seconds) {
+function formatShort(seconds) {
   const n = Number(seconds);
   if (!Number.isFinite(n) || n <= 0) return "";
   if (n % 86400 === 0) return `${n / 86400}d`;
   if (n % 3600 === 0) return `${n / 3600}h`;
   if (n % 60 === 0) return `${n / 60}m`;
   return `${n}s`;
+}
+
+function cadenceLine() {
+  const slow = formatShort(cadence.slow_seconds);
+  if (cadence.fast_seconds) {
+    return `Checking sources every ${formatShort(cadence.fast_seconds)}. Full update every ${slow}.`;
+  }
+  return `Full update every ${slow}.`;
+}
+
+function permitCopy() {
+  const slow = formatShort(cadence.slow_seconds);
+  if (cadence.fast_seconds) {
+    return `Allow live watch to read this claim's saved source pages every ${formatShort(cadence.fast_seconds)}, and run a full update every ${slow}?`;
+  }
+  return `Allow live watch to run a full update every ${slow}?`;
+}
+
+function applyCadence() {
+  const el = $("watch-cadence");
+  if (el) el.textContent = cadenceLine();
+}
+
+function hideWatchPermit() {
+  const el = $("watch-permit");
+  if (el) el.classList.add("hidden");
+}
+
+function showWatchPermit() {
+  const el = $("watch-permit");
+  const copy = $("watch-permit-copy");
+  if (copy) copy.textContent = permitCopy();
+  if (el) el.classList.remove("hidden");
 }
 
 function clampPane(side, value, viewport, other) {
@@ -568,26 +789,6 @@ function clampPane(side, value, viewport, other) {
   const room = width - (Number(other) || 0) - 24 - minStage;
   const max = Math.max(floor, Math.min(cap, room));
   return Math.round(Math.min(max, Math.max(floor, px)));
-}
-
-function syncIntervalSelect(seconds) {
-  const select = $("watch-interval");
-  if (!select) return;
-  const value = String(seconds || 300);
-  const preset = [...select.options].some((opt) => opt.value === value && !opt.dataset.custom);
-  let custom = select.querySelector("option[data-custom]");
-  if (!preset) {
-    if (!custom) {
-      custom = document.createElement("option");
-      custom.dataset.custom = "true";
-      select.appendChild(custom);
-    }
-    custom.value = value;
-    custom.textContent = formatInterval(Number(value));
-  } else if (custom) {
-    custom.remove();
-  }
-  select.value = value;
 }
 
 function applyPaneWidth(side, value, persist) {
@@ -668,10 +869,23 @@ function enableResize() {
 $("open-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const btn = $("open-btn");
+  const statement = $("claim-input").value.trim();
   setBusy(btn, true);
+  const localId = `local-open-${Date.now()}`;
+  localJobs.set(localId, {
+    claim_id: localId,
+    kind: "open",
+    phase: "Surveying the internet for an initial confidence",
+    title: statement || "New claim",
+    confidence: null,
+    model: routeStatus.model,
+    api: routeStatus.api,
+    started_at: Date.now() / 1000,
+    local: true,
+  });
+  renderAgentStatus(mergeJobs());
   showOverlay("Surveying the internet", "Grok is searching the web and X…");
   try {
-    const statement = $("claim-input").value.trim();
     const created = await api("/api/claims", {
       method: "POST",
       body: JSON.stringify({ statement }),
@@ -682,8 +896,10 @@ $("open-form").addEventListener("submit", async (e) => {
   } catch (err) {
     toast(err.message);
   } finally {
+    localJobs.delete(localId);
     setBusy(btn, false);
     hideOverlay();
+    pollActivity();
   }
 });
 
@@ -703,7 +919,17 @@ $("watch-btn").onclick = async () => {
   const btn = $("watch-btn");
   watchingClaims.add(watchingId);
   setBusy(btn, true);
-  setWatchStatus("claim.watch() is searching. The rest of the workspace stays usable.");
+  localJobs.set(watchingId, {
+    claim_id: watchingId,
+    kind: "watch",
+    phase: "Searching the web and X to update confidence",
+    title: current?.title || watchingId,
+    confidence: current?.confidence ?? null,
+    model: routeStatus.model,
+    api: routeStatus.api,
+    started_at: Date.now() / 1000,
+  });
+  renderAgentStatus(mergeJobs());
   try {
     const result = await api(`/api/claims/${watchingId}/watch`, { method: "POST" });
     if (result.in_progress) {
@@ -727,8 +953,9 @@ $("watch-btn").onclick = async () => {
     toast(err.message);
   } finally {
     watchingClaims.delete(watchingId);
+    localJobs.delete(watchingId);
     setBusy(btn, false);
-    setWatchStatus("");
+    pollActivity();
   }
 };
 
@@ -779,29 +1006,34 @@ async function saveWatchConfig() {
   if (!currentId) return;
   await api(`/api/claims/${currentId}/watching`, {
     method: "POST",
-    body: JSON.stringify({
-      watching: $("watching-toggle").checked,
-      interval_seconds: Number($("watch-interval").value),
-    }),
+    body: JSON.stringify({ watching: $("watching-toggle").checked }),
   });
 }
 
-$("watching-toggle").onchange = async () => {
-  try {
-    await saveWatchConfig();
-    await selectClaim(currentId, browseSha);
-  } catch (err) {
-    toast(err.message);
+$("watching-toggle").onchange = () => {
+  if (watchSync) return;
+  if ($("watching-toggle").checked) {
+    showWatchPermit();
+    return;
   }
+  hideWatchPermit();
+  saveWatchConfig()
+    .then(() => selectClaim(currentId, browseSha))
+    .catch((err) => toast(err.message));
 };
 
-$("watch-interval").onchange = async () => {
-  try {
-    await saveWatchConfig();
-    toast("Watch interval saved for this claim.");
-  } catch (err) {
-    toast(err.message);
-  }
+$("watch-permit-yes").onclick = () => {
+  hideWatchPermit();
+  saveWatchConfig()
+    .then(() => selectClaim(currentId, browseSha))
+    .catch((err) => toast(err.message));
+};
+
+$("watch-permit-no").onclick = () => {
+  watchSync = true;
+  $("watching-toggle").checked = false;
+  watchSync = false;
+  hideWatchPermit();
 };
 
 $("service-btn").onclick = async () => {
@@ -814,14 +1046,15 @@ $("service-btn").onclick = async () => {
       toast("Background timer removed.");
       return;
     }
-    const interval = Number($("watch-interval").value || 300);
+    const every = formatShort(cadence.service_seconds);
+    if (!window.confirm(`Install a background timer? It checks watching claims every ${every}, including while this window is closed.`)) return;
     await api("/api/service", {
       method: "POST",
       timeoutMs: 15000,
-      body: JSON.stringify({ interval_seconds: interval }),
+      body: JSON.stringify({ interval_seconds: Number(cadence.service_seconds) || 30 }),
     });
     $("service-btn").textContent = "Remove timer";
-    toast(`Installed a system timer that runs claim.watch() every ${interval}s.`);
+    toast(`Background timer installed. It checks every ${every}.`);
   } catch (err) {
     toast(err.message);
   }
@@ -1039,13 +1272,30 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "b" && currentId) { ev.preventDefault(); $("blame-btn").click(); return; }
 });
 
+function goHome() {
+  if (location.hash) location.hash = "";
+  else showHome();
+}
+
+$("brand-home").onclick = () => goHome();
+$("brand-home").onkeydown = (ev) => {
+  if (ev.key === "Enter" || ev.key === " ") {
+    ev.preventDefault();
+    goHome();
+  }
+};
+
 window.addEventListener("hashchange", () => {
   const { id, sha, compare } = parseRoute();
   if (compare) {
     openCompare().catch((err) => toast(err.message));
     return;
   }
-  if (id && (id !== currentId || sha !== browseSha)) selectClaim(id, sha).catch((err) => toast(err.message));
+  if (id) {
+    if (id !== currentId || sha !== browseSha) selectClaim(id, sha).catch((err) => toast(err.message));
+    return;
+  }
+  showHome();
 });
 
 restorePaneSizes();
@@ -1054,6 +1304,43 @@ enableResize();
 api("/api/service", { timeoutMs: 8000 }).then((status) => {
   if (status.installed === "true") $("service-btn").textContent = "Remove timer";
 }).catch(() => {});
+
+api("/api/providers", { timeoutMs: 8000 }).then((info) => {
+  const next = info?.cadence || {};
+  cadence = {
+    fast_seconds: next.fast_seconds || null,
+    slow_seconds: next.slow_seconds || 300,
+    service_seconds: next.service_seconds || 30,
+  };
+  applyCadence();
+}).catch(() => applyCadence());
+
+async function refreshWatchingClaim() {
+  if (!cadence.fast_seconds || !currentId || browseSha) return;
+  const permit = $("watch-permit");
+  if (permit && !permit.classList.contains("hidden")) return;
+  const toggle = $("watching-toggle");
+  if (!toggle || !toggle.checked) return;
+  try {
+    const data = await api(`/api/claims/${currentId}`, { timeoutMs: 8000 });
+    const headId = data.head && data.head.id;
+    if (!headId || headId === shownHead) return;
+    await selectClaim(currentId);
+  } catch {
+    /* the next tick retries */
+  }
+}
+setInterval(refreshWatchingClaim, 15000);
+
+$("agent-status-main").onclick = () => {
+  const id = $("agent-status").dataset.claimId;
+  if (!id || id.startsWith("local-")) return;
+  selectClaim(id).then(() => focusStageOnNarrow()).catch((err) => toast(err.message));
+};
+
+startActivityClock();
+setInterval(pollActivity, 1500);
+pollActivity();
 
 refreshList()
   .then(() => {

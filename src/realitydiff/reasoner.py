@@ -6,6 +6,14 @@ from typing import Any
 
 from realitydiff.compress import compact_belief, is_material_change
 from realitydiff.models import ClaimOutcome, ClaimState, Evidence, Prediction, Unknown, utcnow
+from realitydiff.score import (
+    AGAINST_KINDS,
+    SUPPORT_KINDS,
+    close_score,
+    normalize_kind,
+    score_evidence,
+    weight_for,
+)
 from realitydiff.xai import LanguageModel, parse_json_object, XAIError
 
 
@@ -33,28 +41,46 @@ Bots and low-trust accounts:
 - If the only chatter is bots, that support does not exist. Mention the gap in unknowns only
   when it changes the belief, without naming or linking the accounts.
 
-Scoring:
-- Confidence is the chance the claim becomes true on the horizon the words actually set.
-- If the claim has no date, "going to", "will", "coming out", and "eventually" mean the near
-  future. They do not mean "already announced", and they do not mean "sometime this decade".
-- Do not invent a deadline, then score the claim against that deadline. refined_statement may
-  clarify wording. It must not add a date, actor, or scope the user did not state.
-- No announcement yet is not evidence against an undated future claim. It means the thing has
-  not happened yet. Do not put "not announced" in evidence_against.
-- A recent cadence of sibling releases is positive evidence. If a family just shipped close
-  variants and one sibling is still on the previous version, an undated claim that the missing
-  sibling ships soon is a likely continuation. That often sits well above 50, commonly 60-80,
-  without a press release for the exact name. Single digits are for claims that contradict a
-  recorded fact or an official denial, not for "the name is not in today's docs".
-- Shape, not a fixed score: a lab ships 6.1 Sol and 6.1 Terra while Luna is still on 6.0.
-  "They are going to release 6.1 Luna", with no date, is a high near-term continuation.
-  Absence of a 6.1 Luna post is expected until it ships.
-- 50 means the evidence is actually mixed, or there is no base rate at all.
-- Do not exceed 85 without official confirmation of the exact claim.
-- Rumors and leaks cap around 65 unless a primary source corroborates them.
-- An official denial, or a shipped product that rules the claim out, should drop confidence.
-- Predictions are near-term checks implied by the claim. Do not flip the claim into a prediction
-  that it will fail.
+Using Kalshi/Polymarket to price predictions is a good way to get a sense of the market's confidence in a prediction. Except do no rely on it solely, and do not cite it, use it for signals, then find adjacent prood/evidence to support the claim/to cite.
+
+Just because something is not announced yet, does not mean it is *not true*. Do not give evidence against a claim just because it is not announced yet.
+
+Scoring is applied in code from your tags. Do not choose the percentage, and do not
+mention the tags, the ledger, or these instructions. Your reason, summary, unknowns,
+and predictions stay free prose about the claim.
+
+If the claim has no date, "going to", "will", "coming out", and "eventually" mean the near
+future. They do not mean "already announced", and they do not mean "sometime this decade".
+Do not invent a deadline. refined_statement may clarify wording. It must not add a date,
+actor, or scope the user did not state.
+
+Tag every evidence item with kind and entity:
+- official_confirmation: a primary source confirms the exact claim.
+- primary_support: docs, filings, or a shipped product that corroborates the claim
+  without confirming the exact wording.
+- reputable_report: a real newsroom or named expert.
+- sibling_cadence: close variants just shipped and this claim is the missing sibling.
+  A lab that shipped 6.1 Sol and 6.1 Terra while Luna is still on 6.0 makes
+  "they are going to release 6.1 Luna" a sibling_cadence, not an absence.
+- rumor: a leak, an anonymous source, or thin secondary chatter.
+- official_denial: the actor denies the exact claim.
+- primary_contradiction: a recorded fact or shipped product rules the claim out.
+  Single-digit beliefs are for this and for official_denial, not for a missing announcement.
+- reputable_contradiction: a serious source argues the claim is false.
+- rumor_against: weak or anonymous opposition.
+- absence: not announced yet, not in today's docs, no post yet. Tag it or leave it out.
+  Do not put it in evidence_against. A product that has not updated yet is not
+  primary_contradiction of an undated future claim.
+
+entity is one slug per organization. An outlet, its editions, bureaus, international
+arms, and official accounts share that slug.
+
+adjustment is an integer from -8 to 8 for a factor the tags miss. Use 0 unless you
+need it. Market prices, if you use them, belong here and must not be cited.
+adjustment_why is one short sentence, or empty when adjustment is 0.
+
+Predictions are near-term checks implied by the claim. Do not flip the claim into a prediction
+that it will fail.
 
 You have a close_claim tool. Call it only when the claim's real-world outcome is now known
 from primary evidence (official confirmation, shipping product, recorded result, court ruling).
@@ -75,15 +101,17 @@ Return JSON with this exact shape:
 {{
   "statement": "canonical claim, precise and testable",
   "refined_statement": "clearer wording of the same claim, with no new date or scope",
-  "confidence": 0-100 number (not a string),
-  "reason": "why this confidence, citing the strongest evidence with URLs",
+  "reason": "why the evidence points this way, citing the strongest sources with URLs",
   "summary": "one paragraph current belief",
+  "adjustment": 0,
+  "adjustment_why": "",
   "evidence_for": [
     {{
       "statement": "what the evidence actually shows",
       "source_url": "https://...",
       "source_title": "title",
-      "weight": 0.0-1.0,
+      "kind": "rumor",
+      "entity": "organization slug",
       "notes": "how this supports the claim and caveats"
     }}
   ],
@@ -102,14 +130,14 @@ Return JSON with this exact shape:
 }}
 
 Apply the private scoring, entity, and source rules. Do not mention them.
+- Do not emit a confidence percentage. Tags and adjustment are the only numbers.
 - Undated "going to" / "will" / "coming out" / "eventually" means the near future.
-  No announcement yet is not evidence against. Do not invent a deadline.
-- Sibling products that just shipped raise the chance the missing one ships soon.
-  That is often 60-80, not single digits, until a primary source confirms the exact claim.
-- Do not exceed 85 without official confirmation of the exact claim.
-- Rumors and leaks cap around 65 unless a primary source corroborates them.
-- An official denial, or a shipped product that rules the claim out, drops confidence.
-- 50 means the evidence is actually mixed, or there is no base rate.
+  No announcement yet is absence, not evidence against. Do not invent a deadline.
+- Sibling products that just shipped are sibling_cadence, not a contradiction.
+- official_confirmation is only for a primary source of the exact claim.
+- Rumors and leaks are rumor, not reputable_report.
+- An official denial, or a shipped product that rules the claim out, is
+  official_denial or primary_contradiction.
 - CNN International and CNN are the same entity. Editions, bureaus, and official accounts
   of one organization are one source, not independent corroboration.
 - Ignore bots and accounts created in the last few days. Do not cite them.
@@ -130,16 +158,20 @@ CURRENT STATE (compressed):
 Previously known source URLs:
 {urls}
 
+FAST LANE (hints since the last full update; verify them, they are not citations):
+{fast_lane}
+
 Search the live web and X for anything new: docs, code, job posts, earnings, leaks,
 official statements, shipping products, regulatory filings.
 
 Return ONLY JSON:
 {{
   "changed": true or false,
-  "reason": "if changed, one paragraph: what new evidence appeared and how it moves confidence, with URLs",
+  "reason": "if changed, one paragraph: what new evidence appeared and how it moves the belief, with URLs",
   "statement": "canonical claim",
   "refined_statement": "...",
-  "confidence": 0-100,
+  "adjustment": 0,
+  "adjustment_why": "",
   "summary": "...",
   "evidence_for": [
     {{
@@ -147,7 +179,8 @@ Return ONLY JSON:
       "statement": "...",
       "source_url": "https://...",
       "source_title": "...",
-      "weight": 0.0-1.0,
+      "kind": "keep the prior kind unless the source class changed",
+      "entity": "organization slug",
       "notes": "..."
     }}
   ],
@@ -170,18 +203,19 @@ Return ONLY JSON:
 Rules:
 - changed=false if you found only duplicates of existing evidence, or only reworded the same facts.
 - Ignore retrieved timestamps and stylistic rewrites. A commit needs new URLs, status changes, or ≥1 point of confidence.
-- Move confidence conservatively. A single rumor is +3 to +8, not +30.
-- Direct official documentation that confirms the refined claim can jump more.
-- Direct official contradiction should drop more.
+- Do not emit a confidence percentage. Keep prior kind and entity when the same source remains.
+- A new rumor stays kind rumor. Direct official documentation of the exact claim is
+  official_confirmation. A recorded fact that rules the claim out is primary_contradiction.
 - Keep prior evidence unless retracted or obsolete; mark obsolescence in notes.
 - If the claim itself has resolved, call close_claim and set changed=true.
 - Apply the private scoring, entity, and source rules. Do not mention them.
-- Undated "going to" / "will" / "eventually" means the near future. No announcement yet is not
-  evidence against, and not a reason to stay near zero. Do not invent a deadline.
-- Sibling releases that just shipped are evidence the missing sibling is likely soon.
+- Undated "going to" / "will" / "eventually" means the near future. No announcement yet is
+  absence, not evidence against. Do not invent a deadline.
+- Sibling releases that just shipped are sibling_cadence for the missing sibling.
 - CNN International and CNN are the same entity. An edition and its parent are one source.
 - Ignore bots and accounts created in the last few days. Do not cite them. Drop any prior
   evidence item that is only a bot or a brand-new coordinated account.
+- Fast-lane notes are unverified hints. Search before you treat them as evidence.
 """
 
 
@@ -195,7 +229,7 @@ class Reasoner:
             search=True,
             system=SYSTEM_PROMPT,
             conv_id=conv_id or "realitydiff-init",
-            cache_key="realitydiff-init-v4",
+            cache_key="realitydiff-init-v5",
         )
         data = _payload_from_result(
             result,
@@ -216,6 +250,7 @@ class Reasoner:
         conv_id: str | None = None,
         previous_response_id: str | None = None,
         compaction: dict[str, Any] | None = None,
+        fast_lane: str | None = None,
     ) -> tuple[ClaimState, str, bool, dict[str, Any]]:
         urls = sorted(
             {
@@ -229,11 +264,12 @@ class Reasoner:
                 claim=claim.strip(),
                 state=json.dumps(compact_belief(current), ensure_ascii=False, separators=(",", ":")),
                 urls="\n".join(urls) or "(none)",
+                fast_lane=(fast_lane or "").strip() or "(none)",
             ),
             search=True,
             system=SYSTEM_PROMPT,
             conv_id=conv_id,
-            cache_key=conv_id or "realitydiff-watch-v4",
+            cache_key=f"{conv_id}-v5" if conv_id else "realitydiff-watch-v5",
             previous_response_id=previous_response_id,
             compaction=compaction,
         )
@@ -276,23 +312,43 @@ class Reasoner:
         prev_unknowns = {item.id: item for item in previous.unknowns} if previous else {}
         prev_preds = {item.id: item for item in previous.predictions} if previous else {}
 
-        evidence_for = self._parse_evidence(data.get("evidence_for") or [], prev_for)
-        evidence_against = self._parse_evidence(data.get("evidence_against") or [], prev_against)
-        evidence_for, evidence_against = _attach_sources(evidence_for, evidence_against, sources or [], data)
+        previous_evidence = {**prev_against, **prev_for}
+        seen: set[str] = set()
+        parsed_for = self._parse_evidence(data.get("evidence_for") or [], previous_evidence, side="for", seen=seen)
+        parsed_against = self._parse_evidence(
+            data.get("evidence_against") or [], previous_evidence, side="against", seen=seen
+        )
+        evidence_for, evidence_against = _attach_sources(parsed_for, parsed_against, sources or [], data)
+        evidence_for, evidence_against = _bucket_by_kind(evidence_for + evidence_against)
+        adjustment = _coerce_number(data.get("adjustment"), default=0.0, lo=-8.0, hi=8.0)
+        card = score_evidence(
+            evidence_for,
+            evidence_against,
+            adjustment=adjustment,
+            adjustment_why=str(data.get("adjustment_why") or "").strip()[:240],
+        )
 
         return ClaimState(
             statement=str(data.get("statement") or fallback_statement).strip(),
             refined_statement=str(data.get("refined_statement") or "").strip(),
-            confidence=_coerce_number(data.get("confidence"), default=50.0),
+            confidence=card.confidence,
             summary=str(data.get("summary") or "").strip(),
             evidence_for=evidence_for,
             evidence_against=evidence_against,
             unknowns=self._parse_unknowns(data.get("unknowns") or [], prev_unknowns),
             predictions=self._parse_predictions(data.get("predictions") or [], prev_preds),
             outcome=previous.outcome if previous else None,
+            score=card,
         )
 
-    def _parse_evidence(self, items: list[Any], previous: dict[str, Evidence]) -> list[Evidence]:
+    def _parse_evidence(
+        self,
+        items: list[Any],
+        previous: dict[str, Evidence],
+        *,
+        side: str,
+        seen: set[str],
+    ) -> list[Evidence]:
         parsed: list[Evidence] = []
         seen: set[str] = set()
         for item in items:
@@ -308,23 +364,33 @@ class Reasoner:
             notes = str(item.get("notes") or "")
             if source_is_untrusted(statement=statement, title=source_title, notes=notes, url=source_url or ""):
                 continue
+            requested_id = str(item.get("id") or "")
+            prior = previous.get(requested_id) if requested_id else None
             candidate = Evidence.make(
                 statement,
                 source_url=source_url,
                 source_title=item.get("source_title") or None,
-                weight=_coerce_number(item.get("weight"), default=0.5, lo=0.0, hi=1.0),
                 notes=notes,
                 retrieved_at=utcnow(),
             )
-            requested_id = str(item.get("id") or "")
-            if requested_id and requested_id in previous:
-                prior = previous[requested_id]
+            if prior is None:
+                prior = previous.get(candidate.id)
+            if prior is not None:
                 candidate = candidate.model_copy(
                     update={
-                        "id": requested_id,
+                        "id": prior.id,
                         "retrieved_at": prior.retrieved_at,
                     }
                 )
+            kind = _kind_for_item(item.get("kind"), prior=prior, side=side)
+            if kind is None:
+                continue
+            entity = str(item.get("entity") or "").strip()
+            if not entity and prior is not None:
+                entity = prior.entity
+            candidate = candidate.model_copy(
+                update={"kind": kind, "entity": entity, "weight": weight_for(kind)}
+            )
             if candidate.id in seen:
                 continue
             seen.add(candidate.id)
@@ -379,6 +445,28 @@ class Reasoner:
         return parsed[:8]
 
 
+def _kind_for_item(raw: Any, *, prior: Evidence | None, side: str) -> str | None:
+    text = str(raw or "").strip()
+    if text:
+        return normalize_kind(text, side=side)
+    if prior is not None and prior.kind and prior.kind != "absence":
+        return prior.kind
+    return normalize_kind("", side=side)
+
+
+def _bucket_by_kind(items: list[Evidence]) -> tuple[list[Evidence], list[Evidence]]:
+    support: list[Evidence] = []
+    against: list[Evidence] = []
+    for item in items:
+        if item.kind in AGAINST_KINDS:
+            against.append(item)
+        elif item.kind in SUPPORT_KINDS:
+            support.append(item)
+    support.sort(key=lambda item: item.weight, reverse=True)
+    against.sort(key=lambda item: item.weight, reverse=True)
+    return support[:12], against[:12]
+
+
 def _payload_from_result(result: dict[str, Any], *, required: bool = True) -> dict[str, Any]:
     text = str(result.get("text") or "")
     if not text.strip():
@@ -402,13 +490,13 @@ def apply_close_claim(state: ClaimState, close: Any) -> ClaimState:
     summary = str(close.get("outcome") or "").strip()
     if not summary:
         return state
-    confidence = close.get("confidence")
-    if confidence is None:
-        if verdict == "confirmed":
-            confidence = 100.0
-        elif verdict == "falsified":
-            confidence = 0.0
-        else:
+    if verdict == "confirmed":
+        confidence = 100.0
+    elif verdict == "falsified":
+        confidence = 0.0
+    else:
+        confidence = close.get("confidence")
+        if confidence is None:
             confidence = state.confidence
     outcome = ClaimOutcome(
         verdict=verdict,
@@ -426,19 +514,23 @@ def apply_close_claim(state: ClaimState, close: Any) -> ClaimState:
     ):
         source_url = None
     if source_url:
+        kind = "official_denial" if verdict == "falsified" else "official_confirmation" if verdict == "confirmed" else ""
         item = Evidence.make(
             summary,
             source_url=source_url,
             source_title=outcome.source_title,
-            weight=1.0,
+            weight=weight_for(kind) if kind else 1.0,
             notes="Primary source for the final outcome.",
+            kind=kind,
         )
         bucket = evidence_for if verdict != "falsified" else evidence_against
         if all((existing.source_url or "").rstrip("/") != source_url.rstrip("/") for existing in bucket):
             bucket.insert(0, item)
+    final = _coerce_number(confidence, default=state.confidence)
     return state.model_copy(
         update={
-            "confidence": _coerce_number(confidence, default=state.confidence),
+            "confidence": final,
+            "score": close_score(state.score, verdict, confidence=final),
             "outcome": outcome,
             "summary": summary if not state.summary else state.summary,
             "evidence_for": evidence_for[:12],

@@ -15,6 +15,7 @@ def compact_belief(state: ClaimState) -> dict[str, Any]:
         "statement": state.statement,
         "refined_statement": state.refined_statement,
         "confidence": state.confidence,
+        "score": _compact_score(state),
         "summary": _clip(state.summary, 420),
         "evidence_for": [_compact_evidence(item) for item in state.evidence_for],
         "evidence_against": [_compact_evidence(item) for item in state.evidence_against],
@@ -47,12 +48,28 @@ def is_material_change(before: ClaimState, after: ClaimState) -> bool:
     return False
 
 
+def _compact_score(state: ClaimState) -> dict[str, Any] | None:
+    if state.score is None:
+        return None
+    card = state.score
+    return {
+        "prior": card.prior,
+        "steps": [{"label": step.label, "points": step.points, "kind": step.kind} for step in card.steps],
+        "adjustment": card.adjustment,
+        "adjustment_why": _clip(card.adjustment_why, 160),
+        "caps": card.caps,
+        "confidence": card.confidence,
+    }
+
+
 def _compact_evidence(item: Evidence) -> dict[str, Any]:
     return {
         "id": item.id,
         "statement": _clip(item.statement, 220),
         "source_url": item.source_url,
         "source_title": item.source_title,
+        "kind": item.kind,
+        "entity": item.entity,
         "weight": round(item.weight, 2),
         "notes": _clip(item.notes, 160),
     }

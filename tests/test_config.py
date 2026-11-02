@@ -26,6 +26,17 @@ def test_load_env_missing_file_is_fine(tmp_path):
     config.load_env(tmp_path / "missing")
 
 
+def test_load_env_also_reads_checkout_dotenv(tmp_path, monkeypatch):
+    import os
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "config_file", lambda: tmp_path / "missing-config")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    (tmp_path / ".env").write_text("OPENROUTER_API_KEY=from-dotenv\n")
+    config.load_env()
+    assert os.environ["OPENROUTER_API_KEY"] == "from-dotenv"
+
+
 def test_config_file_respects_xdg(tmp_path, monkeypatch):
     monkeypatch.delenv("REALITYDIFF_CONFIG", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))

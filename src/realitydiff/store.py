@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS claims (
     watch_interval_seconds INTEGER NOT NULL DEFAULT 300,
     head TEXT,
     last_watched_at TEXT,
+    last_probed_at TEXT,
+    pending_signals_json TEXT,
+    source_fingerprints_json TEXT,
     working_json TEXT,
     last_response_id TEXT,
     compaction_json TEXT,
@@ -91,6 +94,12 @@ class BeliefStore:
             self._conn.execute("ALTER TABLE claims ADD COLUMN closed_at TEXT")
         if "outcome_verdict" not in cols:
             self._conn.execute("ALTER TABLE claims ADD COLUMN outcome_verdict TEXT")
+        if "last_probed_at" not in cols:
+            self._conn.execute("ALTER TABLE claims ADD COLUMN last_probed_at TEXT")
+        if "pending_signals_json" not in cols:
+            self._conn.execute("ALTER TABLE claims ADD COLUMN pending_signals_json TEXT")
+        if "source_fingerprints_json" not in cols:
+            self._conn.execute("ALTER TABLE claims ADD COLUMN source_fingerprints_json TEXT")
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS compare_runs (
@@ -172,6 +181,58 @@ class BeliefStore:
         stamp = (when or utcnow()).isoformat()
         self._conn.execute("UPDATE claims SET last_watched_at = ? WHERE id = ?", (stamp, claim_id))
         self._conn.commit()
+
+    def mark_probed(self, claim_id: str, when: datetime | None = None) -> None:
+        stamp = (when or utcnow()).isoformat()
+        with self._lock:
+            self._conn.execute("UPDATE claims SET last_probed_at = ? WHERE id = ?", (stamp, claim_id))
+            self._conn.commit()
+
+    def pending_signals(self, claim_id: str) -> list[dict]:
+        row = self._conn.execute(
+            "SELECT pending_signals_json FROM claims WHERE id = ?", (claim_id,)
+        ).fetchone()
+        if not row or not row["pending_signals_json"]:
+            return []
+        try:
+            data = json.loads(row["pending_signals_json"])
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if isinstance(item, dict)]
+
+    def set_pending_signals(self, claim_id: str, signals: list[dict]) -> None:
+        payload = json.dumps(signals[-8:])
+        with self._lock:
+            self._conn.execute(
+                "UPDATE claims SET pending_signals_json = ? WHERE id = ?",
+                (payload, claim_id),
+            )
+            self._conn.commit()
+
+    def source_fingerprints(self, claim_id: str) -> dict[str, dict]:
+        row = self._conn.execute(
+            "SELECT source_fingerprints_json FROM claims WHERE id = ?", (claim_id,)
+        ).fetchone()
+        if not row or not row["source_fingerprints_json"]:
+            return {}
+        try:
+            data = json.loads(row["source_fingerprints_json"])
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        return {str(key): value for key, value in data.items() if isinstance(value, dict)}
+
+    def set_source_fingerprints(self, claim_id: str, fingerprints: dict[str, dict]) -> None:
+        payload = json.dumps(fingerprints)
+        with self._lock:
+            self._conn.execute(
+                "UPDATE claims SET source_fingerprints_json = ? WHERE id = ?",
+                (payload, claim_id),
+            )
+            self._conn.commit()
 
     def set_model_cache(
         self,
@@ -343,6 +404,13 @@ class BeliefStore:
             head=row["head"],
             last_watched_at=datetime.fromisoformat(row["last_watched_at"])
             if row["last_watched_at"]
+            else None,
+            last_probed_at=datetime.fromisoformat(row["last_probed_at"])
+            if "last_probed_at" in row.keys() and row["last_probed_at"]
+            else None,
+            pending_signals_json=row["pending_signals_json"] if "pending_signals_json" in row.keys() else None,
+            source_fingerprints_json=row["source_fingerprints_json"]
+            if "source_fingerprints_json" in row.keys()
             else None,
             last_response_id=row["last_response_id"] if "last_response_id" in row.keys() else None,
             compaction_json=row["compaction_json"] if "compaction_json" in row.keys() else None,

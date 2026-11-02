@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Reality Diff — Git for beliefs</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/static/styles.css?v=0.4.9" />
+  <link rel="stylesheet" href="/static/styles.css?v=0.5.8" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
 </head>
@@ -19,8 +19,8 @@
       <button type="button" id="show-log" role="tab">history</button>
     </div>
     <aside class="rail" id="rail">
-      <header class="brand">
-        <div class="mark">Δ</div>
+      <header class="brand" id="brand-home" role="button" tabindex="0" title="All claims">
+        <div class="mark" aria-hidden="true">Δ</div>
         <div>
           <h1>Reality Diff</h1>
           <p>git for beliefs</p>
@@ -47,7 +47,6 @@
     <div class="gutter" data-side="rail" role="separator" aria-orientation="vertical" aria-label="Resize claims" tabindex="0" title="Drag to resize"></div>
 
     <main class="stage">
-      <div id="watch-status" class="watch-status hidden" role="status"></div>
       <section id="compare-view" class="hidden">
         <p class="kicker">compare</p>
         <h2 class="serif">Same question, several models</h2>
@@ -68,14 +67,13 @@
         </section>
       </section>
       <div id="empty" class="empty">
-        <p class="kicker">living claims</p>
-        <p class="serif">Give it a claim.</p>
-        <p class="hint why">Evidence, confidence, and why that number moved — kept as commits.</p>
-        <ol class="empty-steps">
-          <li>Open a testable claim</li>
-          <li>Read for, against, unknowns, and predictions</li>
-          <li>Watch, diff, blame, or revert</li>
-        </ol>
+        <div id="home-logo" class="home-logo">
+          <div class="mark" aria-hidden="true">Δ</div>
+        </div>
+        <div id="home-board" class="home-board hidden">
+          <p class="kicker">claims</p>
+          <ul id="home-list"></ul>
+        </div>
       </div>
       <section id="claim-view" class="hidden">
         <div id="browse-banner" class="browse-banner hidden">
@@ -83,7 +81,7 @@
           <button type="button" class="ghost" id="browse-head">return to HEAD</button>
         </div>
         <header class="claim-head">
-          <div>
+          <div class="claim-identity">
             <div class="kicker-row">
               <span class="kicker" id="claim-id"></span>
               <button type="button" class="ghost" id="copy-id" title="Copy claim id">copy</button>
@@ -127,16 +125,12 @@
               <input type="checkbox" id="watching-toggle" />
               live watch
             </label>
-            <label class="watch-toggle" for="watch-interval">every
-              <select id="watch-interval">
-                <option value="60">1m</option>
-                <option value="300" selected>5m</option>
-                <option value="900">15m</option>
-                <option value="3600">1h</option>
-                <option value="21600">6h</option>
-                <option value="86400">1d</option>
-              </select>
-            </label>
+            <p id="watch-cadence" class="watch-cadence">Full update every 5m.</p>
+            <div id="watch-permit" class="watch-permit hidden" role="group" aria-label="Allow live watch">
+              <p id="watch-permit-copy"></p>
+              <button type="button" class="ghost" id="watch-permit-yes">Allow</button>
+              <button type="button" class="ghost" id="watch-permit-no">Not now</button>
+            </div>
           </div>
           <button type="button" id="service-btn">Install timer</button>
         </div>
@@ -190,6 +184,17 @@
     </div>
   </div>
   <div id="toast" class="toast hidden"></div>
-  <script src="/static/app.js?v=0.4.9"></script>
+  <footer id="agent-status" class="agent-status" data-state="idle" role="status" aria-live="polite" aria-atomic="true">
+    <button type="button" id="agent-status-main" class="agent-status-main">
+      <span class="agent-led" aria-hidden="true"></span>
+      <span class="agent-copy">
+        <span class="agent-kicker" id="agent-kicker">idle</span>
+        <span class="agent-detail" id="agent-detail">No research running</span>
+      </span>
+    </button>
+    <span class="agent-meta" id="agent-meta"></span>
+    <span class="agent-track" aria-hidden="true"><span></span></span>
+  </footer>
+  <script src="/static/app.js?v=0.5.8"></script>
 </body>
 </html>

@@ -12,6 +12,21 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+EvidenceKind = Literal[
+    "",
+    "official_confirmation",
+    "primary_support",
+    "reputable_report",
+    "sibling_cadence",
+    "rumor",
+    "official_denial",
+    "primary_contradiction",
+    "reputable_contradiction",
+    "rumor_against",
+    "absence",
+]
+
+
 class Evidence(BaseModel):
     id: str
     statement: str
@@ -20,6 +35,8 @@ class Evidence(BaseModel):
     retrieved_at: datetime = Field(default_factory=utcnow)
     weight: float = 0.5
     notes: str = ""
+    kind: EvidenceKind = ""
+    entity: str = ""
 
     @field_validator("weight")
     @classmethod
@@ -36,6 +53,8 @@ class Evidence(BaseModel):
         weight: float = 0.5,
         notes: str = "",
         retrieved_at: datetime | None = None,
+        kind: EvidenceKind = "",
+        entity: str = "",
     ) -> "Evidence":
         return cls(
             id=stable_item_id("ev", source_url or "", statement),
@@ -45,6 +64,8 @@ class Evidence(BaseModel):
             weight=weight,
             notes=notes,
             retrieved_at=retrieved_at or utcnow(),
+            kind=kind,
+            entity=entity,
         )
 
 
@@ -95,6 +116,21 @@ class Prediction(BaseModel):
         )
 
 
+class ScoreStep(BaseModel):
+    label: str
+    points: float
+    kind: str = ""
+
+
+class ScoreCard(BaseModel):
+    prior: float = 50.0
+    steps: list[ScoreStep] = Field(default_factory=list)
+    adjustment: float = 0.0
+    adjustment_why: str = ""
+    caps: list[str] = Field(default_factory=list)
+    confidence: float = 50.0
+
+
 class ClaimState(BaseModel):
     statement: str
     refined_statement: str = ""
@@ -105,6 +141,7 @@ class ClaimState(BaseModel):
     predictions: list[Prediction] = Field(default_factory=list)
     summary: str = ""
     outcome: ClaimOutcome | None = None
+    score: ScoreCard | None = None
 
     @field_validator("confidence")
     @classmethod
@@ -184,6 +221,9 @@ class ClaimRecord(BaseModel):
     watch_interval_seconds: int = 300
     head: str | None = None
     last_watched_at: datetime | None = None
+    last_probed_at: datetime | None = None
+    pending_signals_json: str | None = None
+    source_fingerprints_json: str | None = None
     last_response_id: str | None = None
     compaction_json: str | None = None
     closed: bool = False

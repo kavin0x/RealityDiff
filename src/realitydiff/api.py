@@ -17,7 +17,9 @@ from realitydiff.schedule import install as install_service
 from realitydiff.schedule import status as service_status
 from realitydiff.schedule import uninstall as uninstall_service
 from realitydiff.compare import CompareLimits, CompareRateLimited, run_compare
+from realitydiff.decisions import default_decision_model
 from realitydiff.providers import default_openrouter_model, default_xai_models, provider_key
+from realitydiff.service import FAST_PROBE_SECONDS, SERVICE_TICK_SECONDS, SLOW_WATCH_SECONDS
 from realitydiff.security import LocalGuard, guard_settings
 from realitydiff.service import RealityDiff
 from realitydiff.watcher import WatchLoop
@@ -103,9 +105,17 @@ def create_app(
 
     @app.get("/api/providers")
     def providers() -> dict:
+        openrouter = bool(provider_key("openrouter"))
         return {
             "xai": bool(provider_key("xai")),
-            "openrouter": bool(provider_key("openrouter")),
+            "openrouter": openrouter,
+            "decisions": openrouter,
+            "decision_model": default_decision_model() if openrouter else None,
+            "cadence": {
+                "fast_seconds": FAST_PROBE_SECONDS if openrouter else None,
+                "slow_seconds": SLOW_WATCH_SECONDS,
+                "service_seconds": SERVICE_TICK_SECONDS,
+            },
             "defaults": {
                 "xai": default_xai_models()[0],
                 "openrouter": default_openrouter_model(),
@@ -132,6 +142,10 @@ def create_app(
     @app.get("/api/compare/history")
     def compare_history(limit: int = Query(default=20, ge=1, le=40)) -> list[dict]:
         return engine.store.list_compare_runs(limit=limit)
+
+    @app.get("/api/activity")
+    def activity() -> dict:
+        return {"jobs": engine.research_activity(), **engine.reasoner_route()}
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

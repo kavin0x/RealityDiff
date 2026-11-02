@@ -113,6 +113,8 @@ def test_apply_close_claim_marks_outcome_and_confidence():
     assert after.outcome is not None
     assert after.outcome.verdict == "confirmed"
     assert after.confidence == 100
+    assert after.score is not None
+    assert "closed confirmed" in after.score.caps
     assert after.evidence_for[0].source_url == "https://developer.apple.com/siri"
     assert is_material_change(before, after) is True
     diff = diff_states(before, after)
