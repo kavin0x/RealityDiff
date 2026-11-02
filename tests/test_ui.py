@@ -47,7 +47,10 @@ def test_ui_keeps_terminal_style_but_is_sparse(tmp_path):
         assert "padding: 10px 0" not in css
 
         assert html.count('class="action-row"') == 2
-        assert "claim.watch()" in html
+        assert ">Watch<" in html
+        assert ">Diff<" in html
+        assert ">Blame<" in html
+        assert ">Revert<" in html
         assert 'id="outcome-banner"' in html
         assert 'id="closed-chip"' in html
         assert 'id="watch-controls"' in html
@@ -79,6 +82,16 @@ def test_ui_keeps_terminal_style_but_is_sparse(tmp_path):
         assert '|| 360' in js
         assert "Math.max(220, rail)" in js
         assert "Math.max(260, log)" in js
+        assert "clampPane" in js
+        assert "formatInterval" in js
+        assert "syncIntervalSelect" in js
+        assert "pointerdown" in js
+        assert "aria-busy" in js
+        assert "touch-action: none" in css
+        assert "100dvh" in css
+        assert "safe-area-inset" in css
+        assert "color-scheme: dark" in css
+        assert "pointer: coarse" in css
 
         assert 'id="status-filter"' in html
         assert 'id="stat-strip"' in html
@@ -98,7 +111,7 @@ def test_ui_keeps_terminal_style_but_is_sparse(tmp_path):
         assert "prefers-reduced-motion" in css
         assert 'id="compare-view"' in html
         assert 'id="compare-grid"' in html
-        assert "compare.run()" in html
+        assert 'id="compare-run"' in html
         assert "renderCompareResults" in js
         assert "/api/compare" in js
         assert ".compare-grid" in css
@@ -133,6 +146,19 @@ if (!matchesClaim(closed, "def", "closed")) throw new Error("id");
 if (weightPercent(0.6) !== 60) throw new Error("weight");
 if (weightPercent(2) !== 100) throw new Error("clamp");
 if (weightPercent("nope") !== 0) throw new Error("nan");
+const clampFn = src.match(/function clampPane\\([\\s\\S]*?\\n\\}}/);
+const intervalFn = src.match(/function formatInterval\\([\\s\\S]*?\\n\\}}/);
+if (!clampFn || !intervalFn) throw new Error("missing pane helpers");
+const clampPane = new Function(clampFn[0] + "; return clampPane;")();
+const formatInterval = new Function(intervalFn[0] + "; return formatInterval;")();
+if (clampPane("rail", 100, 1600, 360) !== 220) throw new Error("rail floor");
+if (clampPane("rail", 900, 1600, 360) !== 480) throw new Error("rail cap");
+if (clampPane("log", 900, 1600, 300) !== 560) throw new Error("log cap");
+if (clampPane("rail", 400, 1200, 560) !== 220) throw new Error("stage room");
+if (formatInterval(90) !== "90s") throw new Error("seconds");
+if (formatInterval(120) !== "2m") throw new Error("minutes");
+if (formatInterval(7200) !== "2h") throw new Error("hours");
+if (formatInterval(172800) !== "2d") throw new Error("days");
 """
     result = subprocess.run(["bun", "-e", script], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stdout + result.stderr

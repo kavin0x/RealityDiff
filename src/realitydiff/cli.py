@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         "--model",
         action="append",
         dest="models",
-        help="provider:model_id, repeatable (xai:grok-4.3 or openrouter:openai/gpt-4o-mini)",
+        help="provider:model_id, repeatable (xai:grok-4.7 or openrouter:openai/gpt-4o-mini)",
     )
     compare_p.add_argument("--timeout", type=float, default=45.0, help="Per-model timeout in seconds (max 120)")
 

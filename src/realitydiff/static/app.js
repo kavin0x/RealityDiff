@@ -69,7 +69,9 @@ function toast(msg) {
 }
 
 function setBusy(btn, busy) {
+  if (!btn) return;
   btn.disabled = busy;
+  btn.setAttribute("aria-busy", busy ? "true" : "false");
   btn.dataset.prev = btn.dataset.prev || btn.textContent;
   btn.textContent = busy ? "…" : btn.dataset.prev;
 }
@@ -231,12 +233,6 @@ function renderClaimList() {
       <div class="claim-meta"><span class="meter" aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, conf))}%"></span></span>
       <span>${label}</span>
       <span>${c.commit_count} commits${watched}</span></div>`;
-    const spark = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    spark.setAttribute("class", "mini-spark");
-    spark.setAttribute("viewBox", "0 0 120 28");
-    spark.setAttribute("aria-hidden", "true");
-    renderSpark(spark, c.spark || []);
-    li.appendChild(spark);
     const open = () => {
       selectClaim(c.id);
       focusStageOnNarrow();
@@ -299,10 +295,7 @@ async function selectClaim(id, sha) {
     browsing,
   });
   $("dirty-chip").classList.toggle("hidden", browsing || !data.dirty);
-  const interval = String(data.claim.watch_interval_seconds || 300);
-  if ([...$("watch-interval").options].some((opt) => opt.value === interval)) {
-    $("watch-interval").value = interval;
-  }
+  syncIntervalSelect(data.claim.watch_interval_seconds || 300);
   fillList($("ev-for"), state?.evidence_for || [], evidenceItem, $("count-for"));
   fillList($("ev-against"), state?.evidence_against || [], evidenceItem, $("count-against"));
   fillList($("unknowns"), state?.unknowns || [], (u) => {
@@ -464,8 +457,8 @@ function renderLog(log, activeSha) {
         <span class="why">${escapeHtml((c.reason || "").slice(0, 220))}${(c.reason || "").length > 220 ? "…" : ""}</span>
         <span class="status">${escapeHtml(c.author)} · ${relativeTime(c.created_at)}</span>
         <div class="commit-actions">
-          <button type="button" class="ghost browse-commit">browse from this commit</button>
-          <button type="button" class="ghost diff-commit">diff</button>
+          <button type="button" class="ghost browse-commit">Browse</button>
+          <button type="button" class="ghost diff-commit">Diff</button>
         </div>
       </div>`;
     li.querySelector(".browse-commit").onclick = (ev) => {
@@ -554,42 +547,121 @@ async function moveClaim(delta) {
   document.querySelector(`#claim-list li[data-id="${CSS.escape(next.id)}"]`)?.scrollIntoView({ block: "nearest" });
 }
 
+function formatInterval(seconds) {
+  const n = Number(seconds);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  if (n % 86400 === 0) return `${n / 86400}d`;
+  if (n % 3600 === 0) return `${n / 3600}h`;
+  if (n % 60 === 0) return `${n / 60}m`;
+  return `${n}s`;
+}
+
+function clampPane(side, value, viewport, other) {
+  const floor = side === "rail" ? 220 : 260;
+  const cap = side === "rail" ? 480 : 560;
+  const width = Math.max(0, Number(viewport) || 0);
+  const fallback = side === "rail" ? 300 : 360;
+  const n = Number(value);
+  const px = Number.isFinite(n) ? n : fallback;
+  if (width > 0 && width <= 1100) return Math.round(Math.min(cap, Math.max(floor, px)));
+  const minStage = Math.min(420, Math.max(280, Math.round(width * 0.34)));
+  const room = width - (Number(other) || 0) - 24 - minStage;
+  const max = Math.max(floor, Math.min(cap, room));
+  return Math.round(Math.min(max, Math.max(floor, px)));
+}
+
+function syncIntervalSelect(seconds) {
+  const select = $("watch-interval");
+  if (!select) return;
+  const value = String(seconds || 300);
+  const preset = [...select.options].some((opt) => opt.value === value && !opt.dataset.custom);
+  let custom = select.querySelector("option[data-custom]");
+  if (!preset) {
+    if (!custom) {
+      custom = document.createElement("option");
+      custom.dataset.custom = "true";
+      select.appendChild(custom);
+    }
+    custom.value = value;
+    custom.textContent = formatInterval(Number(value));
+  } else if (custom) {
+    custom.remove();
+  }
+  select.value = value;
+}
+
+function applyPaneWidth(side, value, persist) {
+  const viewport = document.documentElement.clientWidth || window.innerWidth || 0;
+  const otherName = side === "rail" ? "--log-w" : "--rail-w";
+  const other = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(otherName)) || (side === "rail" ? 360 : 300);
+  const next = clampPane(side, value, viewport, other);
+  document.documentElement.style.setProperty(side === "rail" ? "--rail-w" : "--log-w", `${next}px`);
+  const gutter = document.querySelector(`.gutter[data-side="${side}"]`);
+  if (gutter) {
+    gutter.setAttribute("aria-valuenow", String(next));
+    gutter.setAttribute("aria-valuemin", side === "rail" ? "220" : "260");
+    gutter.setAttribute("aria-valuemax", String(clampPane(side, 9999, viewport, other)));
+  }
+  if (persist === false || viewport <= 1100) return;
+  try {
+    localStorage.setItem(side === "rail" ? "rd-rail-w" : "rd-log-w", String(next));
+  } catch (err) {
+    /* storage can be blocked */
+  }
+}
+
 function restorePaneSizes() {
   const rail = Number(localStorage.getItem("rd-rail-w") || 300);
   const log = Number(localStorage.getItem("rd-log-w") || 360);
-  document.documentElement.style.setProperty("--rail-w", `${Math.max(220, rail)}px`);
-  document.documentElement.style.setProperty("--log-w", `${Math.max(260, log)}px`);
+  applyPaneWidth("rail", Math.max(220, rail), false);
+  applyPaneWidth("log", Math.max(260, log), false);
 }
 
 function enableResize() {
   document.querySelectorAll(".gutter").forEach((gutter) => {
-    gutter.addEventListener("mousedown", (ev) => {
+    gutter.addEventListener("pointerdown", (ev) => {
+      if (ev.pointerType === "mouse" && ev.button !== 0) return;
+      if (window.innerWidth <= 1100) return;
       ev.preventDefault();
+      gutter.setPointerCapture(ev.pointerId);
       gutter.classList.add("dragging");
+      document.documentElement.classList.add("resizing");
       const side = gutter.dataset.side;
+      const prop = side === "rail" ? "--rail-w" : "--log-w";
       const startX = ev.clientX;
-      const startRail = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--rail-w")) || 300;
-      const startLog = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--log-w")) || 360;
-      const onMove = (move) => {
-        const dx = move.clientX - startX;
-        if (side === "rail") {
-          const next = Math.min(480, Math.max(220, startRail + dx));
-          document.documentElement.style.setProperty("--rail-w", `${next}px`);
-          localStorage.setItem("rd-rail-w", String(next));
-        } else {
-          const next = Math.min(560, Math.max(260, startLog - dx));
-          document.documentElement.style.setProperty("--log-w", `${next}px`);
-          localStorage.setItem("rd-log-w", String(next));
-        }
+      const start = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(prop)) || (side === "rail" ? 300 : 360);
+      const move = (pointer) => {
+        const dx = pointer.clientX - startX;
+        applyPaneWidth(side, side === "rail" ? start + dx : start - dx);
       };
-      const onUp = () => {
+      const up = (pointer) => {
         gutter.classList.remove("dragging");
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
+        document.documentElement.classList.remove("resizing");
+        if (gutter.hasPointerCapture(pointer.pointerId)) gutter.releasePointerCapture(pointer.pointerId);
+        gutter.removeEventListener("pointermove", move);
+        gutter.removeEventListener("pointerup", up);
+        gutter.removeEventListener("pointercancel", up);
       };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+      gutter.addEventListener("pointermove", move);
+      gutter.addEventListener("pointerup", up);
+      gutter.addEventListener("pointercancel", up);
     });
+    gutter.addEventListener("keydown", (ev) => {
+      if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
+      ev.preventDefault();
+      const side = gutter.dataset.side;
+      const prop = side === "rail" ? "--rail-w" : "--log-w";
+      const current = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(prop)) || (side === "rail" ? 300 : 360);
+      const step = ev.shiftKey ? 48 : 16;
+      const dir = ev.key === "ArrowRight" ? 1 : -1;
+      applyPaneWidth(side, current + (side === "rail" ? dir : -dir) * step);
+    });
+  });
+  window.addEventListener("resize", () => {
+    const rail = Number(localStorage.getItem("rd-rail-w") || 300);
+    const log = Number(localStorage.getItem("rd-log-w") || 360);
+    applyPaneWidth("rail", Math.max(220, rail), false);
+    applyPaneWidth("log", Math.max(260, log), false);
   });
 }
 
@@ -738,7 +810,7 @@ $("service-btn").onclick = async () => {
     if (status.installed === "true") {
       if (!window.confirm("Uninstall the background watch service?")) return;
       await api("/api/service", { method: "DELETE", timeoutMs: 15000 });
-      $("service-btn").textContent = "install timer service";
+      $("service-btn").textContent = "Install timer";
       toast("Background timer removed.");
       return;
     }
@@ -748,7 +820,7 @@ $("service-btn").onclick = async () => {
       timeoutMs: 15000,
       body: JSON.stringify({ interval_seconds: interval }),
     });
-    $("service-btn").textContent = "remove timer service";
+    $("service-btn").textContent = "Remove timer";
     toast(`Installed a system timer that runs claim.watch() every ${interval}s.`);
   } catch (err) {
     toast(err.message);
@@ -787,7 +859,7 @@ function showCompare(on) {
 
 function defaultCompareModels() {
   return [
-    { provider: "xai", model: "grok-4.3" },
+    { provider: "xai", model: "grok-4.7" },
     { provider: "openrouter", model: "openai/gpt-4o-mini" },
   ];
 }
@@ -980,7 +1052,7 @@ restorePaneSizes();
 enableResize();
 
 api("/api/service", { timeoutMs: 8000 }).then((status) => {
-  if (status.installed === "true") $("service-btn").textContent = "remove timer service";
+  if (status.installed === "true") $("service-btn").textContent = "Remove timer";
 }).catch(() => {});
 
 refreshList()

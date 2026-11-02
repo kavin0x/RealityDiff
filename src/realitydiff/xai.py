@@ -9,16 +9,17 @@ from typing import Any, Protocol
 import httpx
 
 
+# grok-4.7 is the default: 500k context. Later names run only if that call errors.
+CONTEXT_WINDOW = 500_000
 DEFAULT_MODELS = (
-    "grok-4.3",  # 1M context window; cheapest cached-input path among current Grok 4.x
-    "grok-4.5",
-    "grok-4.20-0309-non-reasoning",
+    "grok-4.7",
     "grok-4.6",
 )
 
 JSON_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 TRAILING_COMMA = re.compile(r",(\s*[}\]])")
-COMPACT_AFTER_TOKENS = 6_000
+# Compress once a turn is large, before the 200k price step and well under 500k.
+COMPACT_AFTER_TOKENS = 100_000
 MAX_TOOL_ROUNDS = 3
 
 CLOSE_CLAIM_TOOL: dict[str, Any] = {
@@ -183,7 +184,11 @@ class XAIClient:
                             "raw": body,
                         }
                         if result["input_tokens"] >= COMPACT_AFTER_TOKENS:
-                            result["compaction"] = self._compact(model, payload["input"], sticky)
+                            result["compaction"] = self._compact(
+                                model,
+                                transcript_for_compact(payload["input"], body, system=system),
+                                sticky,
+                            )
                         return result
                     except httpx.HTTPError as exc:
                         last_error = exc
@@ -281,11 +286,12 @@ def _request_plans(
     previous_response_id: str | None,
     compaction: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
+    """Prefer a compaction blob so a long thread actually shrinks, then the stored response."""
     plans: list[dict[str, Any]] = []
-    if previous_response_id:
-        plans.append({"store": True, "previous_response_id": previous_response_id, "compaction": None})
     if compaction and compaction.get("encrypted_content"):
         plans.append({"store": True, "previous_response_id": None, "compaction": compaction})
+    if previous_response_id:
+        plans.append({"store": True, "previous_response_id": previous_response_id, "compaction": None})
     plans.append({"store": True, "previous_response_id": None, "compaction": None})
     plans.append({"store": False, "previous_response_id": None, "compaction": None})
     # Deduplicate identical plans while preserving order.
@@ -338,6 +344,26 @@ def _build_payload(
     if search:
         payload["tools"] = agent_tools(search=True)
     return payload
+
+
+def transcript_for_compact(
+    request_input: list[dict[str, Any]],
+    body: dict[str, Any],
+    *,
+    system: str | None = None,
+) -> list[dict[str, Any]]:
+    """Fold a turn into compact-endpoint messages, including the reply the next watch must keep."""
+    items: list[dict[str, Any]] = []
+    has_system = any(isinstance(item, dict) and item.get("role") == "system" for item in request_input)
+    if system and not has_system:
+        items.append({"role": "system", "content": system})
+    for item in request_input:
+        if isinstance(item, dict) and (item.get("type") == "compaction" or item.get("role")):
+            items.append(item)
+    text = extract_output_text(body).strip()
+    if text:
+        items.append({"role": "assistant", "content": text[:80_000]})
+    return items
 
 
 def agent_tools(*, search: bool = False) -> list[dict[str, Any]]:

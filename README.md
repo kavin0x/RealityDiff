@@ -77,7 +77,8 @@ The installed CLI keeps claims in `~/.local/share/realitydiff/` (set `REALITYDIF
 export XAI_API_KEY=...                 # claims / watch (xAI Responses API)
 export OPENROUTER_API_KEY=...          # optional; compare via OpenRouter
 # or put the same keys in ~/.config/realitydiff/env (mode 600)
-# optional: XAI_MODEL=grok-4.3  OPENROUTER_MODEL=openai/gpt-4o-mini
+# claims default to grok-4.7 (500k context). Override with XAI_MODEL.
+# optional: OPENROUTER_MODEL=openai/gpt-6-luna
 uv sync --extra dev
 uv run realitydiff serve               # 127.0.0.1:8000
 # open http://127.0.0.1:8000 then click "compare models"
@@ -105,24 +106,24 @@ I put a few brakes on compare so one bad afternoon can't drain a key:
 - Every chat call asks for at most 1024 output tokens. Change it with `REALITYDIFF_MAX_TOKENS` (I clamp it to 16 through 8192).
 - At most 3 model calls run at the same time across all compare requests. Extra ones wait their turn.
 - At most 30 model calls per minute in total (a 6 model compare counts as 6). Past that, the API answers 429 with a `Retry-After` header. Change it with `REALITYDIFF_COMPARE_PER_MINUTE` (1 through 600).
-- If you set `REALITYDIFF_COMPARE_MODELS`, only those models can run. It's comma separated: `openrouter:openai/gpt-4o-mini` pins a provider, a bare id like `grok-4.3` works on either one. Leave it unset and any model id goes.
+- If you set `REALITYDIFF_COMPARE_MODELS`, only those models can run. It's comma separated: `openrouter:openai/gpt-6-luna` pins a provider, a bare id like `grok-4.7` works on either one. Leave it unset and any model id goes.
 
 ```bash
 export REALITYDIFF_MAX_TOKENS=1024
 export REALITYDIFF_COMPARE_PER_MINUTE=30
-export REALITYDIFF_COMPARE_MODELS="openrouter:openai/gpt-4o-mini,grok-4.3"
+export REALITYDIFF_COMPARE_MODELS="openrouter:openai/gpt-6-luna,grok-4.7"
 ```
 
 These can also go in `~/.config/realitydiff/env`. All of this lives in the app, so it only helps while the app is the thing spending. I'd also set a credit limit on the OpenRouter key itself (openrouter.ai, Keys page, edit the key) so the cap holds even if something else gets the key.
 
 ```bash
 uv run realitydiff open "Apple is going to replace Siri with an LLM."
-uv run realitydiff open --model grok-4.3 "..."
+uv run realitydiff open --model grok-4.7 "..."
 uv run realitydiff watch <claim_id>
 uv run realitydiff log <claim_id>
 uv run realitydiff diff <claim_id> <sha_a> <sha_b>
 uv run realitydiff compare "Will Apple replace Siri this year?" \
-  -m xai:grok-4.3 -m openrouter:openai/gpt-4o-mini
+  -m xai:grok-4.7 -m openrouter:openai/gpt-6-luna
 ```
 
 ```bash

@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Reality Diff — Git for beliefs</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/static/styles.css?v=0.4.7" />
+  <link rel="stylesheet" href="/static/styles.css?v=0.4.9" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
 </head>
@@ -26,14 +26,13 @@
           <p>git for beliefs</p>
         </div>
       </header>
-      <button type="button" class="ghost" id="nav-compare">compare models</button>
+      <button type="button" id="nav-compare">Compare</button>
       <form id="open-form" class="open-form">
         <label for="claim-input">New claim</label>
         <textarea id="claim-input" rows="3" maxlength="2000" placeholder="Apple is going to replace Siri with an LLM." required></textarea>
-        <button type="submit" id="open-btn">claim.open()</button>
+        <button type="submit" id="open-btn">Open</button>
       </form>
-      <label class="filter-label" for="claim-filter">Filter heads</label>
-      <input id="claim-filter" type="search" placeholder="search claims" />
+      <input id="claim-filter" type="search" placeholder="Filter claims" aria-label="Filter claims" />
       <div class="seg" id="status-filter" role="tablist" aria-label="Claim status">
         <button type="button" data-status="all" class="on" role="tab">all <span class="seg-n">0</span></button>
         <button type="button" data-status="open" role="tab">open <span class="seg-n">0</span></button>
@@ -43,23 +42,23 @@
         <h2>HEADS <span class="count" id="heads-count">0</span></h2>
         <ul id="claim-list"></ul>
       </section>
-      <p class="keys" id="keys"><kbd>/</kbd> filter · <kbd>j</kbd><kbd>k</kbd> claims · <kbd>w</kbd> watch · <kbd>d</kbd> diff · <kbd>b</kbd> blame · <kbd>esc</kbd> close</p>
+      <p class="keys" id="keys"><kbd>/</kbd> filter · <kbd>j</kbd><kbd>k</kbd> move · <kbd>w</kbd> watch · <kbd>d</kbd> diff · <kbd>b</kbd> blame</p>
     </aside>
-    <div class="gutter" data-side="rail" title="Drag to resize"></div>
+    <div class="gutter" data-side="rail" role="separator" aria-orientation="vertical" aria-label="Resize claims" tabindex="0" title="Drag to resize"></div>
 
     <main class="stage">
       <div id="watch-status" class="watch-status hidden" role="status"></div>
       <section id="compare-view" class="hidden">
         <p class="kicker">compare</p>
         <h2 class="serif">Same question, several models</h2>
-        <p class="hint">Keys stay on the server. Enter the model ids to compare, for example openai/gpt-4o-mini on OpenRouter.</p>
+        <p class="hint">Keys stay on the server. Enter the model ids to compare.</p>
         <form id="compare-form" class="compare-form">
           <label for="compare-question">Question</label>
           <textarea id="compare-question" rows="4" maxlength="8000" placeholder="Will Apple replace Siri with an LLM this year?" required></textarea>
           <div id="compare-models"></div>
           <div class="compare-form-actions">
-            <button type="button" class="ghost" id="compare-add">add model</button>
-            <button type="submit" id="compare-run">compare.run()</button>
+            <button type="button" id="compare-add">Add model</button>
+            <button type="submit" id="compare-run">Compare</button>
           </div>
         </form>
         <div id="compare-grid" class="compare-grid"></div>
@@ -71,11 +70,11 @@
       <div id="empty" class="empty">
         <p class="kicker">living claims</p>
         <p class="serif">Give it a claim.</p>
-        <p class="hint why">News feeds overwrite your memory. Reality Diff keeps a git history of a belief: what the internet said, how confident we were, and why that number moved. Diff two weeks, blame a confidence jump, or revert a rumor panic — useful when a claim is still unfolding and you need a trail, not a vibe.</p>
+        <p class="hint why">Evidence, confidence, and why that number moved — kept as commits.</p>
         <ol class="empty-steps">
-          <li>open a testable claim</li>
-          <li>inspect for / against / unknowns / predictions</li>
-          <li>watch, diff, blame, browse a commit, or revert</li>
+          <li>Open a testable claim</li>
+          <li>Read for, against, unknowns, and predictions</li>
+          <li>Watch, diff, blame, or revert</li>
         </ol>
       </div>
       <section id="claim-view" class="hidden">
@@ -118,10 +117,10 @@
         </nav>
         <div class="actions">
           <div class="action-row">
-            <button id="watch-btn">claim.watch()</button>
-            <button id="diff-btn">claim.diff()</button>
-            <button id="blame-btn">claim.blame()</button>
-            <button id="revert-btn" class="danger">claim.revert()</button>
+            <button type="button" id="watch-btn">Watch</button>
+            <button type="button" id="diff-btn">Diff</button>
+            <button type="button" id="blame-btn">Blame</button>
+            <button type="button" id="revert-btn" class="danger">Revert</button>
           </div>
           <div class="action-row" id="watch-controls">
             <label class="watch-toggle">
@@ -139,7 +138,7 @@
               </select>
             </label>
           </div>
-          <button type="button" id="service-btn" class="ghost">install timer service</button>
+          <button type="button" id="service-btn">Install timer</button>
         </div>
         <div class="tree-grid">
           <article id="sec-for">
@@ -165,7 +164,7 @@
         </section>
       </section>
     </main>
-    <div class="gutter" data-side="log" title="Drag to resize"></div>
+    <div class="gutter" data-side="log" role="separator" aria-orientation="vertical" aria-label="Resize history" tabindex="0" title="Drag to resize"></div>
 
     <aside class="log-pane" id="log-pane">
       <header>
@@ -191,6 +190,6 @@
     </div>
   </div>
   <div id="toast" class="toast hidden"></div>
-  <script src="/static/app.js?v=0.4.7"></script>
+  <script src="/static/app.js?v=0.4.9"></script>
 </body>
 </html>

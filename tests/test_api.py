@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from realitydiff import __version__
 from realitydiff.api import create_app
 from realitydiff.service import RealityDiff
 from realitydiff.store import BeliefStore
@@ -10,7 +11,7 @@ def test_http_git_surface(tmp_path):
     engine = RealityDiff(BeliefStore(tmp_path / "db.sqlite"), model=ScriptedModel([INIT, WATCH_HIT]))
     with TestClient(create_app(engine, start_watcher=False), base_url="http://127.0.0.1:8000") as client:
         assert client.get("/api/health").json()["status"] == "ok"
-        assert client.get("/api/health").json()["version"]
+        assert client.get("/api/health").json()["version"] == __version__ == "0.4.5"
         created = client.post(
             "/api/claims", json={"statement": "Apple is going to replace Siri with an LLM."}
         )
