@@ -413,11 +413,13 @@ def format_fast_lane(signals: list[dict]) -> str:
     lines = []
     for item in signals[-8:]:
         material = item.get("material")
+        sided = item.get("sided") or ""
         lines.append(
-            "- {at} {kind} ({action}) material {material} {url}: {excerpt}".format(
+            "- {at} {kind} ({action}){sided} material {material} {url}: {excerpt}".format(
                 at=item.get("at") or "",
                 kind=item.get("kind") or "",
                 action=item.get("action") or "",
+                sided=f" sided {sided}" if sided else "",
                 material="" if material is None else material,
                 url=item.get("url") or "",
                 excerpt=str(item.get("excerpt") or "")[:240],
@@ -456,6 +458,7 @@ def _signal(decision: Decision, action: str, pages: list[dict[str, str]]) -> dic
         "material": round(decision.material, 4),
         "margin": round(decision.margin, 4),
         "size": decision.size,
+        "sided": decision.sided,
         "url": pages[0]["url"] if pages else "",
         "excerpt": " ".join(page.get("excerpt") or "" for page in pages)[:400],
         "reason": decision_reason(decision),

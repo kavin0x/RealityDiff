@@ -127,6 +127,42 @@ def test_official_signal_runs_reasoner_immediately(tmp_path, monkeypatch):
     assert engine.store.pending_signals(living.id) == []
 
 
+def test_two_sided_page_escalates_instead_of_nudging(tmp_path, monkeypatch):
+    decision = Decision(0.99, "contradiction", 0.57, "nudge", sided="both", sided_margin=0.80)
+    engine, model = _engine(
+        tmp_path,
+        monkeypatch,
+        decision=decision,
+        snapshots=_snaps("https://example.com/bloomberg", "A leak says yes. A spokesperson denies it."),
+        payloads=[INIT, WATCH_NOOP],
+    )
+    living = _open(engine)
+    before = living.head.state.confidence
+    engine.watch_due()
+    assert len(model.calls) == 2
+    prompt = model.calls[-1]["prompt"]
+    assert "sided both" in prompt
+    assert "A leak says yes" in prompt
+    assert living.head.state.confidence == pytest.approx(before)
+    assert engine.store.pending_signals(living.id) == []
+
+
+def test_resolved_with_no_margin_escalates(tmp_path, monkeypatch):
+    decision = Decision(1.0, "resolved", 0.0, "rewrite")
+    engine, model = _engine(
+        tmp_path,
+        monkeypatch,
+        decision=decision,
+        snapshots=_snaps("https://example.com/bloomberg", "The product shipped."),
+        payloads=[INIT, WATCH_NOOP],
+    )
+    living = _open(engine)
+    engine.watch_due()
+    assert len(model.calls) == 2
+    assert "The product shipped" in model.calls[-1]["prompt"]
+    assert engine.store.pending_signals(living.id) == []
+
+
 def test_decision_failure_does_not_mark_clocks(tmp_path, monkeypatch):
     engine, model = _engine(
         tmp_path,

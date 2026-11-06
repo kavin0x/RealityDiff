@@ -24,6 +24,11 @@ def _answers(noul=0.91, kind="rumor", probs=None, score=1.1):
         "answers": {
             "material": {"type": "noul", "noul": noul},
             "kind": {"type": "choice", "choice": kind, "probabilities": probs},
+            "sided": {
+                "type": "choice",
+                "choice": "one",
+                "probabilities": {"one": 0.96, "both": 0.03, "neither": 0.01},
+            },
             "size": {"type": "score", "score": score},
         },
     }
@@ -40,7 +45,7 @@ def test_request_shape_and_parse():
     body = json.loads(handler.calls[0].content)
     assert str(handler.calls[0].url) == OPENROUTER_DECISIONS_URL
     assert body["model"] == DEFAULT_DECISION_MODEL
-    assert set(body["questions"]) == {"material", "kind", "size"}
+    assert set(body["questions"]) == {"material", "kind", "sided", "size"}
     assert body["questions"]["material"]["type"] == "noul"
     assert body["questions"]["kind"]["type"] == "choice"
     assert body["questions"]["size"]["type"] == "score"
@@ -49,6 +54,8 @@ def test_request_shape_and_parse():
     assert decision.material == pytest.approx(0.91)
     assert decision.margin == pytest.approx(0.89)
     assert decision.size == "nudge"
+    assert decision.sided == "one"
+    assert decision.sided_margin == pytest.approx(0.93)
     assert gate(decision) == "nudge"
 
 
@@ -106,13 +113,18 @@ def test_env_override(monkeypatch):
 
 def test_gate_thresholds():
     assert gate(Decision(0.91, "rumor", 0.88, "nudge")) == "nudge"
-    assert gate(Decision(0.91, "contradiction", 0.80, "nudge")) == "nudge"
+    assert gate(Decision(0.91, "contradiction", 0.80, "nudge", sided="one", sided_margin=0.90)) == "nudge"
     assert gate(Decision(0.91, "rumor", 0.04, "nudge")) == "hold"
     assert gate(Decision(0.40, "rumor", 0.80, "nudge")) == "skip"
     assert gate(Decision(0.95, "official", 0.90, "nudge")) == "escalate"
     assert gate(Decision(0.95, "resolved", 0.90, "unchanged")) == "escalate"
+    assert gate(Decision(1.0, "resolved", 0.0, "rewrite")) == "escalate"
     assert gate(Decision(0.95, "rumor", 0.70, "rewrite")) == "escalate"
     assert gate(Decision(0.20, "none", 0.90, "unchanged")) == "skip"
+    assert gate(Decision(0.99, "contradiction", 0.57, "nudge", sided="both", sided_margin=0.80)) == "escalate"
+    assert gate(Decision(0.99, "contradiction", 0.18, "nudge", sided="both", sided_margin=0.40)) == "escalate"
+    assert gate(Decision(0.99, "contradiction", 0.57, "nudge")) == "escalate"
+    assert gate(Decision(0.40, "contradiction", 0.80, "nudge", sided="both", sided_margin=0.70)) == "hold"
 
 
 def test_page_baseline_then_change(monkeypatch):

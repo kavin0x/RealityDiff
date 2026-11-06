@@ -41,10 +41,22 @@ _QUESTIONS: dict[str, Any] = {
         "instructions": "What kind of change is this, if any?",
         "criteria": {
             "none": "No meaningful change, or only a duplicate or restyle.",
-            "rumor": "An unverified report, leak, or secondary account that the claim may be moving.",
-            "contradiction": "A source that cuts against the claim without officially settling it.",
+            "rumor": "A one-sided unverified report, leak, or secondary account that the claim may be moving.",
+            "contradiction": "One-sided opposition that does not officially settle the claim. Not a page that also supports it.",
             "official": "A primary source confirms or denies the claim itself.",
             "resolved": "The real-world outcome of the claim is now known.",
+        },
+    },
+    "sided": {
+        "type": "choice",
+        "instructions": (
+            "Does this page change pull in one direction, or does the same page "
+            "contain both support and opposition?"
+        ),
+        "criteria": {
+            "one": "The new text supports the claim, or it opposes the claim, but not both.",
+            "both": "The same page contains both support and opposition, such as a leak and a denial together.",
+            "neither": "No directional evidence about the claim.",
         },
     },
     "size": {
@@ -78,22 +90,44 @@ class Decision:
     margin: float
     size: str
     model: str = ""
+    sided: str = ""
+    sided_margin: float = 0.0
 
 
 def gate(decision: Decision) -> str:
-    """skip, hold, nudge, or escalate. Ambiguous splits are held for the slow model."""
+    """skip, hold, nudge, or escalate.
+
+    Official and resolved outcomes escalate even when the choice margin is 0,
+    so a shipped result is not stuck behind a tied distribution. A page that
+    contains both support and opposition never nudges. A contradiction nudges
+    only when the page is explicitly one-sided.
+    """
+    if decision.kind in {"official", "resolved"}:
+        return "escalate"
+    if decision.sided == "both":
+        if decision.material >= MATERIAL_MIN or decision.size == "rewrite":
+            return "escalate"
+        return "hold"
     if decision.margin < MARGIN_MIN:
         return "hold"
-    if decision.kind in {"official", "resolved"} or (
-        decision.size == "rewrite" and decision.kind != "none"
-    ):
+    if decision.size == "rewrite" and decision.kind != "none":
         return "escalate"
     if (
         decision.material >= MATERIAL_MIN
         and decision.size == "nudge"
-        and decision.kind in {"rumor", "contradiction"}
+        and decision.kind == "rumor"
     ):
         return "nudge"
+    if (
+        decision.material >= MATERIAL_MIN
+        and decision.size == "nudge"
+        and decision.kind == "contradiction"
+        and decision.sided == "one"
+        and decision.sided_margin >= MARGIN_MIN
+    ):
+        return "nudge"
+    if decision.kind == "contradiction" and decision.material >= MATERIAL_MIN and decision.size == "nudge":
+        return "escalate"
     return "skip"
 
 
@@ -173,7 +207,16 @@ def decision_from_body(body: dict[str, Any], *, model: str) -> Decision:
     kind, margin = _kind_margin(kind_answer)
     size_answer = answers.get("size")
     size = _size_label(size_answer if isinstance(size_answer, dict) else {})
-    return Decision(material=material, kind=kind, margin=margin, size=size, model=model)
+    sided, sided_margin = _sided(answers.get("sided"))
+    return Decision(
+        material=material,
+        kind=kind,
+        margin=margin,
+        size=size,
+        model=model,
+        sided=sided,
+        sided_margin=sided_margin,
+    )
 
 
 def _fallbackable(exc: ProviderError) -> bool:
@@ -205,6 +248,15 @@ def _kind_margin(answer: dict[str, Any]) -> tuple[str, float]:
             return top_k, max(0.0, top_p - second)
     kind = str(answer.get("choice") or "none").strip().lower() or "none"
     return kind, 0.0
+
+
+def _sided(answer: Any) -> tuple[str, float]:
+    if not isinstance(answer, dict):
+        return "", 0.0
+    label, margin = _kind_margin(answer)
+    if label not in {"one", "both", "neither"}:
+        return "", 0.0
+    return label, margin
 
 
 def _size_label(answer: dict[str, Any]) -> str:
