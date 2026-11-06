@@ -1,10 +1,13 @@
 from realitydiff.xai import _build_payload, _request_plans
 
 
-def test_cache_plans_prefer_previous_response_then_fallback():
+def test_cache_plans_prefer_compaction_then_previous_response_then_fallback():
     plans = _request_plans(previous_response_id="resp_1", compaction={"encrypted_content": "blob"})
-    assert plans[0]["previous_response_id"] == "resp_1"
+    assert plans[0]["compaction"]["encrypted_content"] == "blob"
+    assert plans[0]["previous_response_id"] is None
     assert plans[0]["store"] is True
+    assert plans[1]["previous_response_id"] == "resp_1"
+    assert plans[1]["compaction"] is None
     assert plans[-1]["store"] is False
     assert plans[-1]["previous_response_id"] is None
 

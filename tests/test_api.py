@@ -40,16 +40,16 @@ def test_http_git_surface(tmp_path):
         home = client.get("/")
         assert home.status_code == 200
         assert b"Reality Diff" in home.content
-        assert b"claim.watch()" in home.content
-        assert b"News feeds overwrite your memory" in home.content
+        assert b"git for beliefs" in home.content
+        assert b'id="watch-btn"' in home.content
         assert b'id="compare-view"' in home.content
-        assert b"compare.run()" in home.content
+        assert b'id="compare-run"' in home.content
         providers = client.get("/api/providers")
         assert providers.status_code == 200
         assert "openrouter" in providers.json()
         app_js = client.get("/static/app.js")
         assert app_js.status_code == 200
-        assert b"browse from this commit" in app_js.content
+        assert b"browse-commit" in app_js.content
         tree = client.get(f"/api/claims/{claim_id}/tree")
         assert tree.status_code == 200
         assert tree.json()["nodes"]
